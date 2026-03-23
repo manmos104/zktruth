@@ -2,6 +2,8 @@
 
 import { useState, useRef, useEffect, useCallback } from "react";
 import { useAccount, useDisconnect } from 'wagmi';
+import { useMintVerifiedProof, useMintUnverifiedProof, toBytes32Hash, hashGps } from '@/lib/useZkTruth';
+import { ZKTRUTH_CONTRACT_ADDRESS } from '@/lib/contract';
 
 
 const styles = `
@@ -1407,6 +1409,12 @@ export default function Home() {
 
   const WLD_GAS_FEE = "0.05 WLD";
 
+  // Smart contract hooks
+  const isContractDeployed = ZKTRUTH_CONTRACT_ADDRESS !== "0x0000000000000000000000000000000000000000";
+  const { mint: mintVerified, txHash: verifiedTxHash, isPending: isVerifiedPending, isConfirming: isVerifiedConfirming, isSuccess: isVerifiedSuccess } = useMintVerifiedProof();
+  const { mint: mintUnverified, txHash: unverifiedTxHash, isPending: isUnverifiedPending, isConfirming: isUnverifiedConfirming, isSuccess: isUnverifiedSuccess } = useMintUnverifiedProof();
+  const [onchainMinting, setOnchainMinting] = useState(false);
+
 
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -1553,18 +1561,60 @@ export default function Home() {
     }
   }, [capturedVideo]);
 
-  const startMinting = useCallback(() => {
-    let step = 0;
-    const interval = setInterval(() => {
-      step++;
-      setMintStep(step);
-      if (step >= MINT_STEPS.length - 1) {
-        clearInterval(interval);
-        setTxHash(generateTxHash());
+  const startMinting = useCallback(async () => {
+    if (isContractDeployed && proofData && isConnected) {
+      // Real on-chain minting
+      try {
+        setOnchainMinting(true);
+        setMintStep(0);
+        const contentHash = proofData.hash as `0x${string}`;
+        const gpsHash = toBytes32Hash(proofData.gps || "0,0");
+        const captureTimestamp = BigInt(Math.floor(new Date(proofData.timestamp).getTime() / 1000));
+        const mediaType = proofData.type === "video" ? 1 : 0;
+
+        if (mintMode === "verified" && worldIdNullifier) {
+          const nullifierHash = worldIdNullifier as `0x${string}`;
+          await mintVerified({ contentHash, gpsHash, nullifierHash, captureTimestamp, mediaType });
+        } else {
+          await mintUnverified({ contentHash, gpsHash, captureTimestamp, mediaType });
+        }
+      } catch (e) {
+        console.error("Mint error:", e);
+        setOnchainMinting(false);
+      }
+    } else {
+      // Simulated minting (contract not deployed yet)
+      let step = 0;
+      const interval = setInterval(() => {
+        step++;
+        setMintStep(step);
+        if (step >= MINT_STEPS.length - 1) {
+          clearInterval(interval);
+          setTxHash(generateTxHash());
+          setTimeout(() => setMintComplete(true), 500);
+        }
+      }, 600);
+    }
+  }, [isContractDeployed, proofData, isConnected, mintMode, worldIdNullifier, mintVerified, mintUnverified]);
+
+  // Watch for on-chain mint confirmation
+  useEffect(() => {
+    if (onchainMinting) {
+      if (isVerifiedPending || isUnverifiedPending) {
+        setMintStep(1); // Signing transaction
+      }
+      if (isVerifiedConfirming || isUnverifiedConfirming) {
+        setMintStep(3); // Broadcasting to chain
+      }
+      if (isVerifiedSuccess || isUnverifiedSuccess) {
+        const hash = verifiedTxHash || unverifiedTxHash;
+        setTxHash(hash || generateTxHash());
+        setMintStep(4); // NFT minted
+        setOnchainMinting(false);
         setTimeout(() => setMintComplete(true), 500);
       }
-    }, 600);
-  }, []);
+    }
+  }, [onchainMinting, isVerifiedPending, isUnverifiedPending, isVerifiedConfirming, isUnverifiedConfirming, isVerifiedSuccess, isUnverifiedSuccess, verifiedTxHash, unverifiedTxHash]);
 
   const handleCapture = useCallback(async () => {
     if (capturing) return;
