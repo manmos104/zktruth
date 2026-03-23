@@ -2,7 +2,7 @@
 
 import { useState, useRef, useEffect, useCallback } from "react";
 import { useAccount, useDisconnect } from 'wagmi';
-import { useConnectModal } from '@rainbow-me/rainbowkit';
+
 
 const styles = `
 @import url('https://fonts.googleapis.com/css2?family=Space+Mono:ital,wght@0,400;0,700;1,400&family=Syne:wght@400;700;800&display=swap');
@@ -1377,7 +1377,7 @@ const MINT_STEPS = [
 export default function Home() {
   const { address, isConnected } = useAccount();
   const { disconnect } = useDisconnect();
-  const { openConnectModal } = useConnectModal();
+  const openConnectModal = () => { alert('Wallet connect coming soon'); };
   const [splashPhase, setSplashPhase] = useState(0);
   const [screen, setScreen] = useState("camera");
   const [cameraReady, setCameraReady] = useState(false);

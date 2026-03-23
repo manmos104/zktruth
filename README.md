@@ -5,13 +5,13 @@
   <img src="https://img.shields.io/badge/License-MIT-blue?style=for-the-badge" alt="License" />
 </p>
 
-# zkTRUTH — Proof of Capture
+# zkTruth — Proof of Capture
 
 > **Fight misinformation with cryptographic proof of reality.**
 
-zkTRUTH is a decentralized camera application that cryptographically proves media authenticity using zero-knowledge proofs and blockchain timestamping on World Chain.
+zkTruth is a decentralized camera application that cryptographically proves media authenticity using zero-knowledge proofs and blockchain timestamping on World Chain.
 
-In a world where AI-generated deepfakes are indistinguishable from reality, zkTRUTH establishes trust at the point of capture — not after the fact.
+In a world where AI-generated deepfakes are indistinguishable from reality, zkTruth establishes trust at the point of capture — not after the fact.
 
 ---
 
@@ -109,7 +109,7 @@ Open [https://localhost:3000](https://localhost:3000) in your browser.
 
 ```
 ┌─────────────────────────────────────────────┐
-│                 zkTRUTH App                  │
+│                 zkTruth App                  │
 │         (Next.js PWA / React 19)            │
 ├──────────┬──────────┬───────────────────────┤
 │  Camera  │ Metadata │    UI / Sharing       │
@@ -178,7 +178,7 @@ Open [https://localhost:3000](https://localhost:3000) in your browser.
 
 ### Honest Limitations
 
-zkTRUTH proves **when, where, and by whom** media was captured, and that it hasn't been modified. It does **not** verify the semantic meaning of content (e.g., photographing a screen showing fake content).
+zkTruth proves **when, where, and by whom** media was captured, and that it hasn't been modified. It does **not** verify the semantic meaning of content (e.g., photographing a screen showing fake content).
 
 ---
 
@@ -197,5 +197,5 @@ MIT License — see [LICENSE](LICENSE) for details.
 ---
 
 <p align="center">
-  <b>zkTRUTH — Where every capture tells the truth.</b>
+  <b>zkTruth — Where every capture tells the truth.</b>
 </p>

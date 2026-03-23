@@ -283,7 +283,7 @@ function ProofContent() {
           </div>
           <div className="proof-field">
             <span className="proof-field-key">Protocol</span>
-            <span className="proof-field-value">zkTRUTH v0.1</span>
+            <span className="proof-field-value">zkTruth v0.1</span>
           </div>
 
           <div className="proof-hash-full">
@@ -293,7 +293,7 @@ function ProofContent() {
         </div>
 
         <button className="proof-cta" onClick={() => window.location.href = '/'}>
-          ✦ OPEN zkTRUTH APP
+          ✦ OPEN zkTruth APP
         </button>
 
         <div className="proof-footer">

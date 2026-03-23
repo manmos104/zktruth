@@ -14,7 +14,7 @@ export const worldChain = defineChain({
 })
 
 export const config = getDefaultConfig({
-  appName: 'zkTRUTH',
+  appName: 'zkTruth',
   projectId: 'demo-project-id',
   chains: [worldChain],
   ssr: true,

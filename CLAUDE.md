@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-This is **zkTRUTH**, a Next.js 16 application that demonstrates "Proof of Capture" - authenticated photos on World Chain. The app creates a mobile camera interface for capturing photos/videos and minting them as NFTs with cryptographic proof of authenticity, leveraging World ID for identity verification.
+This is **zkTruth**, a Next.js 16 application that demonstrates "Proof of Capture" - authenticated photos on World Chain. The app creates a mobile camera interface for capturing photos/videos and minting them as NFTs with cryptographic proof of authenticity, leveraging World ID for identity verification.
 
 ## Core Architecture
 
