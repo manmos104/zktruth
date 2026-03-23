@@ -1,4 +1,4 @@
-export const ZKTRUTH_CONTRACT_ADDRESS = "0x0000000000000000000000000000000000000000"; // TODO: Replace after deployment
+export const ZKTRUTH_CONTRACT_ADDRESS = "0x90999af88c81b289823aE75edF73A3E4089E7C02"; // World Chain Sepolia
 
 export const ZKTRUTH_ABI = [
   // Verified Minting
