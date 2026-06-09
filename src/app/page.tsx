@@ -4,6 +4,7 @@ import { useState, useRef, useEffect, useCallback } from "react";
 import { useAccount, useDisconnect } from 'wagmi';
 import { useMintVerifiedProof, useMintUnverifiedProof, toBytes32Hash, hashGps } from '@/lib/useZkTruth';
 import { ZKTRUTH_CONTRACT_ADDRESS } from '@/lib/contract';
+import { WorldIdVerifyButton } from '@/lib/worldid';
 
 
 const styles = `
@@ -1396,6 +1397,7 @@ export default function Home() {
   const [recording, setRecording] = useState(false);
   const [recordingTime, setRecordingTime] = useState(0);
   const [worldIdVerifying, setWorldIdVerifying] = useState(false);
+  const [worldIdError, setWorldIdError] = useState<string | null>(null);
   const [worldIdVerified, setWorldIdVerified] = useState(false);
   const [worldIdNullifier, setWorldIdNullifier] = useState<string | null>(null);
   const [mintMode, setMintMode] = useState("verified");
@@ -1403,14 +1405,16 @@ export default function Home() {
   const [copyStatus, setCopyStatus] = useState("");
 
   const [facingMode, setFacingMode] = useState<"environment"|"user">("environment");
-  const [zoomLevel, setZoomLevel] = useState(1);
+  const [zoomLevel, setZoomLevel] = useState(0.5);
   const [gpsCoords, setGpsCoords] = useState<string>("Acquiring GPS…");
   const [gpsLocation, setGpsLocation] = useState<string>("");
 
   const WLD_GAS_FEE = "0.05 WLD";
 
   // Smart contract hooks
-  const isContractDeployed = ZKTRUTH_CONTRACT_ADDRESS !== "0x0000000000000000000000000000000000000000";
+  // Cast to string so TS doesn't narrow the literal type and complain that the
+  // comparison can never be false (Production build via Turbopack is strict).
+  const isContractDeployed = (ZKTRUTH_CONTRACT_ADDRESS as string) !== "0x0000000000000000000000000000000000000000";
   const { mint: mintVerified, txHash: verifiedTxHash, isPending: isVerifiedPending, isConfirming: isVerifiedConfirming, isSuccess: isVerifiedSuccess } = useMintVerifiedProof();
   const { mint: mintUnverified, txHash: unverifiedTxHash, isPending: isUnverifiedPending, isConfirming: isUnverifiedConfirming, isSuccess: isUnverifiedSuccess } = useMintUnverifiedProof();
   const [onchainMinting, setOnchainMinting] = useState(false);
@@ -1479,15 +1483,48 @@ export default function Home() {
     }
   }, []);
 
-  const startCamera = useCallback(async (facing?: "environment"|"user") => {
+  // Pick a specific back-camera lens by enumerating devices. iOS Safari exposes
+  // labels like "Back Ultra Wide Camera", "Back Camera", "Back Telephoto Camera"
+  // once camera permission has been granted at least once. We match by regex.
+  const findBackCameraDeviceId = useCallback(async (which: "ultrawide"|"wide"|"tele"): Promise<string | null> => {
+    try {
+      const devices = await navigator.mediaDevices.enumerateDevices();
+      const videos = devices.filter(d => d.kind === "videoinput");
+      const matchers: Record<typeof which, RegExp> = {
+        ultrawide: /ultra.?wide|0\.5/i,
+        wide: /^back(?!.*(ultra|tele))|^rear(?!.*(ultra|tele))|back camera$/i,
+        tele: /tele(photo)?|2x|3x/i,
+      };
+      const hit = videos.find(d => matchers[which].test(d.label));
+      return hit?.deviceId ?? null;
+    } catch {
+      return null;
+    }
+  }, []);
+
+  // Whether the back camera has been swapped to the ultra-wide device. We track
+  // this so we know to swap back to the main lens when the user picks 1x or
+  // higher. iOS Safari ≥17 also lets us drive the swap via a unified `zoom`
+  // constraint on the composite "Back Camera" device — we try that first.
+  const [isUltraWide, setIsUltraWide] = useState(false);
+  // Front camera FOV mode. iOS exposes a single front lens but switching the
+  // requested aspect ratio coaxes a wider sensor crop out of it.
+  const [isFrontWide, setIsFrontWide] = useState(false);
+
+  const startCamera = useCallback(async (facing?: "environment"|"user", opts?: { deviceId?: string; frontWide?: boolean }) => {
     try {
       if (streamRef.current) {
         streamRef.current.getTracks().forEach(t => t.stop());
       }
-      const constraints = {
-        video: { facingMode: facing || facingMode, width: { ideal: 1080 }, height: { ideal: 1920 } },
-        audio: false
-      };
+      let video: MediaTrackConstraints;
+      if (opts?.deviceId) {
+        video = { deviceId: { exact: opts.deviceId }, width: { ideal: 1920 }, height: { ideal: 1440 } };
+      } else if ((facing || facingMode) === "user" && opts?.frontWide) {
+        video = { facingMode: "user", width: { ideal: 1920 }, height: { ideal: 1440 }, aspectRatio: { ideal: 4 / 3 } };
+      } else {
+        video = { facingMode: facing || facingMode, width: { ideal: 1080 }, height: { ideal: 1920 } };
+      }
+      const constraints: MediaStreamConstraints = { video, audio: false };
       const stream = await navigator.mediaDevices.getUserMedia(constraints);
       streamRef.current = stream;
       if (videoRef.current) {
@@ -1503,31 +1540,102 @@ export default function Home() {
     }
   }, [facingMode]);
 
-  const flipCamera = useCallback(() => {
+  const flipCamera = useCallback(async () => {
     const next = facingMode === "environment" ? "user" : "environment";
     setFacingMode(next);
-    startCamera(next);
-    setZoomLevel(1);
-  }, [facingMode, startCamera]);
+    setZoomLevel(0.5);
+    setIsUltraWide(false);
+    setIsFrontWide(false);
 
-  const handleZoom = useCallback((level: number) => {
-    setZoomLevel(level);
-    if (streamRef.current) {
-      const track = streamRef.current.getVideoTracks()[0];
-      const caps = track.getCapabilities?.() as any;
-      if (caps?.zoom) {
-        const min = caps.zoom.min || 1;
-        const max = caps.zoom.max || 10;
-        const nativeZoom = Math.min(Math.max(level, min), max);
-        track.applyConstraints({ advanced: [{ zoom: nativeZoom } as any] }).catch(() => {});
-      }
+    // Whichever camera we land on, immediately apply our single wide mode so
+    // the user never has to pick a zoom level. handleZoom's closure has the
+    // stale facingMode, so we inline the per-camera logic here.
+    if (next === "user") {
+      await startCamera("user", { frontWide: true });
+      setIsFrontWide(true);
+      return;
     }
-  }, []);
+    await startCamera("environment");
+    const track = streamRef.current?.getVideoTracks()[0];
+    const caps = (track as any)?.getCapabilities?.();
+    if (track && caps?.zoom && (caps.zoom.min ?? 1) < 1) {
+      try {
+        await track.applyConstraints({ advanced: [{ zoom: caps.zoom.min } as any] });
+        return;
+      } catch { /* fall through */ }
+    }
+    const uwId = await findBackCameraDeviceId("ultrawide");
+    if (uwId) {
+      await startCamera("environment", { deviceId: uwId });
+      setIsUltraWide(true);
+    }
+  }, [facingMode, startCamera, findBackCameraDeviceId]);
+
+  const handleZoom = useCallback(async (level: number) => {
+    setZoomLevel(level);
+
+    // -------- FRONT CAMERA --------
+    if (facingMode === "user") {
+      const wantWide = level < 1;
+      if (wantWide !== isFrontWide) {
+        await startCamera("user", { frontWide: wantWide });
+        setIsFrontWide(wantWide);
+      }
+      return;
+    }
+
+    // -------- BACK CAMERA, WIDE (< 1x) --------
+    if (level < 1) {
+      // Path A: iOS 17+ unified device — apply zoom < 1 directly.
+      const track = streamRef.current?.getVideoTracks()[0];
+      const caps = (track as any)?.getCapabilities?.();
+      if (track && caps?.zoom && (caps.zoom.min ?? 1) < 1) {
+        try {
+          await track.applyConstraints({ advanced: [{ zoom: caps.zoom.min } as any] });
+          return;
+        } catch { /* fall through */ }
+      }
+      // Path B: explicit ultra-wide deviceId switch (older iOS / split devices).
+      if (!isUltraWide) {
+        const id = await findBackCameraDeviceId("ultrawide");
+        if (id) {
+          await startCamera("environment", { deviceId: id });
+          setIsUltraWide(true);
+        }
+      }
+      return;
+    }
+
+    // -------- BACK CAMERA, 1x AND ABOVE --------
+    // Restore the main lens if we'd swapped to ultra-wide.
+    if (isUltraWide) {
+      const id = await findBackCameraDeviceId("wide");
+      if (id) {
+        await startCamera("environment", { deviceId: id });
+      } else {
+        await startCamera("environment");
+      }
+      setIsUltraWide(false);
+    }
+    const track = streamRef.current?.getVideoTracks()[0];
+    const caps = (track as any)?.getCapabilities?.();
+    if (track && caps?.zoom) {
+      const min = caps.zoom.min || 1;
+      const max = caps.zoom.max || 10;
+      const nativeZoom = Math.min(Math.max(level, min), max);
+      track.applyConstraints({ advanced: [{ zoom: nativeZoom } as any] }).catch(() => {});
+    }
+  }, [facingMode, isUltraWide, isFrontWide, findBackCameraDeviceId, startCamera]);
+
+  // CSS scale on the <video> tag. Sub-1x is achieved by the lens/aspect switch
+  // above, so the on-screen scale stays at 1 for wide. 1x+ uses CSS as a backup
+  // for devices without hardware zoom.
+  const displayScale = Math.max(zoomLevel, 1);
 
   useEffect(() => {
     if (screen === "camera") {
       // Small delay to ensure video element is mounted in DOM
-      const timer = setTimeout(() => {
+      const timer = setTimeout(async () => {
         if (streamRef.current && videoRef.current) {
           // Reconnect existing stream to new video element
           videoRef.current.srcObject = streamRef.current;
@@ -1536,8 +1644,11 @@ export default function Home() {
           setCameraReady(true);
           setSimMode(false);
         } else {
-          // No existing stream, start fresh
-          startCamera(facingMode);
+          // No existing stream, start fresh — then immediately switch to the
+          // ultra-wide lens / 4:3 front-wide mode so the user always opens to
+          // the widest available FOV (the only zoom option in the UI now).
+          await startCamera(facingMode);
+          handleZoom(0.5);
         }
       }, 100);
       return () => clearTimeout(timer);
@@ -1831,8 +1942,11 @@ export default function Home() {
         if (vr > cr) { sw = vh * cr; sx = (vw - sw) / 2; }
         else { sh = vw / cr; sy = (vh - sh) / 2; }
 
-        // Apply zoom
-        const z = zoomLevel;
+        // Apply digital zoom — matches the preview's displayScale so the
+        // captured image frames exactly what the user saw. Below the lens's
+        // base FOV (e.g. 0.5x on ultra-wide, 0.7x on front-wide) scale stays
+        // at 1 and we just hand back the full sensor frame.
+        const z = displayScale;
         if (z > 1) {
           const zw = sw / z, zh = sh / z;
           sx += (sw - zw) / 2; sy += (sh - zh) / 2;
@@ -1923,15 +2037,32 @@ export default function Home() {
     }
   }, []);
 
-  const handleWorldIdVerify = useCallback(() => {
+  // Coordinator callbacks for the real IDKit-backed WorldIdVerifyButton.
+  // The widget itself owns the modal + server-verify call; we just react to
+  // state transitions to drive the rest of the mint flow.
+  const handleWorldIdVerifying = useCallback(() => {
     if (worldIdVerifying || worldIdVerified) return;
+    setWorldIdError(null);
     setWorldIdVerifying(true);
-    setTimeout(() => {
-      const n = '0x' + Array.from({length: 40}, () => '0123456789abcdef'[Math.floor(Math.random() * 16)]).join('');
-      setWorldIdNullifier(n); setWorldIdVerified(true); setWorldIdVerifying(false); setMintMode("verified");
-      setTimeout(() => { setScreen("share"); }, 1200);
-    }, 2000);
-  }, [worldIdVerifying, worldIdVerified, startMinting]);
+  }, [worldIdVerifying, worldIdVerified]);
+
+  const handleWorldIdVerified = useCallback((nullifierHash: `0x${string}`) => {
+    setWorldIdNullifier(nullifierHash);
+    setWorldIdVerified(true);
+    setWorldIdVerifying(false);
+    setMintMode("verified");
+    setTimeout(() => { setScreen("share"); }, 1200);
+  }, []);
+
+  const handleWorldIdError = useCallback((msg: string) => {
+    console.error('[WorldID] verification failed:', msg);
+    setWorldIdError(msg);
+    setWorldIdVerifying(false);
+  }, []);
+
+  // Legacy alias kept so any non-button callsite still type-checks. The actual
+  // verification is now driven by <WorldIdVerifyButton/> in the JSX below.
+  const handleWorldIdVerify = handleWorldIdVerifying;
 
 
   const handleUnverifiedMint = useCallback(() => {
@@ -1956,7 +2087,7 @@ export default function Home() {
     if (t) p.set('t', String(t));
     if (l) p.set('l', l);
     const qs = p.toString();
-    return `https://zktruth.xyz/proof/${h}${qs ? '?' + qs : ''}`;
+    return `https://zktruth.vercel.app/proof/${h}${qs ? '?' + qs : ''}`;
   }, [proofData, gpsLocation]);
 
   const handleShareWithImage = useCallback(async () => {
@@ -2054,7 +2185,7 @@ export default function Home() {
 
         {screen === "camera" && (
           <>
-            <video ref={videoRef} className="camera-video" autoPlay playsInline muted style={{display: cameraReady ? 'block' : 'none', transform: `${facingMode === 'user' ? 'scaleX(-1)' : ''} scale(${zoomLevel})`.trim(), transformOrigin: 'center center'}} />
+            <video ref={videoRef} className="camera-video" autoPlay playsInline muted style={{display: cameraReady ? 'block' : 'none', transform: `${facingMode === 'user' ? 'scaleX(-1)' : ''} scale(${displayScale})`.trim(), transformOrigin: 'center center'}} />
             {!cameraReady && (
               <div className="simulated-bg">
                 <div className="grid-overlay" />
@@ -2094,12 +2225,9 @@ export default function Home() {
             </div>
 
             <div className="bottom-controls">
-              <div className="zoom-controls">
-                <button className={`zoom-btn ${zoomLevel === 1 ? 'active' : ''}`} onClick={() => handleZoom(1)}>1x</button>
-                <button className={`zoom-btn ${zoomLevel === 1.5 ? 'active' : ''}`} onClick={() => handleZoom(1.5)}>1.5x</button>
-                <button className={`zoom-btn ${zoomLevel === 2 ? 'active' : ''}`} onClick={() => handleZoom(2)}>2x</button>
-                <button className={`zoom-btn ${zoomLevel === 3 ? 'active' : ''}`} onClick={() => handleZoom(3)}>3x</button>
-              </div>
+              {/* Zoom controls removed — app always opens to the widest FOV
+                  (back ultra-wide / front 4:3) and lets the user flip cameras
+                  with the FLIP button. */}
               <div className="mode-tabs">
                 <button className={`mode-tab ${captureMode === 'photo' ? 'active' : ''}`} onClick={() => !recording && setCaptureMode('photo')}>PHOTO</button>
                 <button className={`mode-tab ${captureMode === 'video' ? 'active' : ''}`} onClick={() => !recording && setCaptureMode('video')}>VIDEO</button>
@@ -2130,9 +2258,31 @@ export default function Home() {
               <div className="wid-bottom">
                 <div className="wid-hash">{proofData.hash.slice(0,22)}...</div>
                 <div className="wid-time">{proofData.timestamp.split('T')[1]?.split('.')[0]} UTC • World Chain</div>
-                <button className="wid-verify-btn" onClick={handleWorldIdVerify} disabled={worldIdVerifying || worldIdVerified}>
-                  {worldIdVerifying ? 'VERIFYING...' : worldIdVerified ? 'VERIFIED ✓' : 'VERIFY :: WORLD ID'}
-                </button>
+                <WorldIdVerifyButton
+                  signal={proofData?.hash ?? ''}
+                  verifying={worldIdVerifying}
+                  verified={worldIdVerified}
+                  onVerifying={handleWorldIdVerifying}
+                  onVerified={handleWorldIdVerified}
+                  onError={handleWorldIdError}
+                />
+                {worldIdError && (
+                  <div style={{
+                    marginTop: 8,
+                    padding: '8px 12px',
+                    background: 'rgba(255,59,92,0.12)',
+                    border: '1px solid rgba(255,59,92,0.4)',
+                    borderRadius: 6,
+                    color: '#ff3b5c',
+                    fontFamily: 'Space Mono, monospace',
+                    fontSize: 11,
+                    lineHeight: 1.4,
+                    wordBreak: 'break-word',
+                  }}>
+                    <div style={{ opacity: 0.7, marginBottom: 2 }}>WORLD ID ERROR</div>
+                    <div>{worldIdError}</div>
+                  </div>
+                )}
                 <button className="wid-gas-btn" onClick={handleUnverifiedMint} disabled={worldIdVerifying || worldIdVerified}>
                   MINT :: PAY GAS <span className="wld-gas-tag">{WLD_GAS_FEE}</span>
                 </button>
@@ -2266,14 +2416,23 @@ export default function Home() {
                 <div className="wid-badge">SHARE PROOF</div>
               </div>
               <div className="wid-bottom">
-                <button className="wid-verify-btn" onClick={handleShareWithImage}>
-                  SHARE
+                <button className="wid-verify-btn" onClick={() => {
+                  // URL-only X intent so the timeline renders our Twitter Card
+                  // (frame + thumbnail) instead of uploading the raw video.
+                  const url = buildProofUrl();
+                  const text = 'Verified proof of capture via zkTruth';
+                  window.open(`https://x.com/intent/tweet?text=${encodeURIComponent(text)}&url=${encodeURIComponent(url)}`, '_blank');
+                }}>
+                  POST TO X
                 </button>
                 <button className="wid-gas-btn" onClick={() => { const url = buildProofUrl(); window.open(`https://warpcast.com/~/compose?text=${encodeURIComponent('Verified proof of capture via zkTruth\n\n' + url)}&embeds[]=${encodeURIComponent(url)}`, '_blank'); }}>
                   <span style={{fontSize:16}}>🟣</span> FARCASTER
                 </button>
                 <button className="wid-gas-btn" onClick={handleCopyLink}>
                   <span>🔗</span> COPY LINK
+                </button>
+                <button className="wid-gas-btn" onClick={handleShareWithImage}>
+                  <span>💾</span> SAVE / OTHER
                 </button>
                 <div className="sns-copy-status">{copyStatus}</div>
               </div>

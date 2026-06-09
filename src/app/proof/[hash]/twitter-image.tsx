@@ -1,11 +1,39 @@
 import { ImageResponse } from 'next/og'
+import fs from 'node:fs'
+import path from 'node:path'
 
-export const runtime = 'edge'
+export const runtime = 'nodejs'
 export const size = { width: 1200, height: 630 }
 export const contentType = 'image/png'
 
-export default function TwitterImage({ params }: { params: { hash: string } }) {
-  const hash = params.hash || '0x0000'
+// Embed the official brand logo (green-check variant) as a data URL. The
+// source file is the high-res 1422×1334 PNG that was hand-designed for the
+// brand — no font-substitution, no icon trace approximation.
+const logoDataUrl: string = (() => {
+  try {
+    const p = path.join(process.cwd(), 'public', 'zktruth-logo-green.png')
+    return `data:image/png;base64,${fs.readFileSync(p).toString('base64')}`
+  } catch {
+    return ''
+  }
+})()
+
+// Syne TTFs for the metadata typography (header/footer chrome only — the
+// hero is the rasterised brand lockup so it always matches the source).
+const fontsDir = path.join(process.cwd(), 'public', 'fonts')
+const safeRead = (f: string): Buffer => {
+  try { return fs.readFileSync(path.join(fontsDir, f)) } catch { return Buffer.alloc(0) }
+}
+const syneMedium = safeRead('Syne-Medium.ttf')
+const syneBold = safeRead('Syne-Bold.ttf')
+
+export default function TwitterImage({
+  params,
+}: {
+  params: { hash: string }
+}) {
+  const hash = params?.hash ?? '0x0000'
+  const shortHash = `${hash.slice(0, 10)}…${hash.slice(-8)}`
 
   return new ImageResponse(
     (
@@ -16,85 +44,104 @@ export default function TwitterImage({ params }: { params: { hash: string } }) {
           display: 'flex',
           flexDirection: 'column',
           alignItems: 'center',
-          justifyContent: 'center',
-          background: 'linear-gradient(160deg, #080818 0%, #0a1628 40%, #0d0d1a 100%)',
-          fontFamily: 'sans-serif',
+          justifyContent: 'space-between',
+          background: '#faf9f5',
+          fontFamily: 'Syne',
+          padding: '40px 64px',
         }}
       >
-        <div
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: '16px',
-            marginBottom: '24px',
-          }}
-        >
+        {/* Top: small VERIFIED · WORLD CHAIN pill, right-aligned. */}
+        <div style={{ width: '100%', display: 'flex', justifyContent: 'flex-end' }}>
           <div
             style={{
-              width: '48px',
-              height: '48px',
-              borderRadius: '50%',
-              background: 'rgba(0,255,135,0.12)',
-              border: '2px solid #00ff87',
               display: 'flex',
               alignItems: 'center',
-              justifyContent: 'center',
-              fontSize: '24px',
-              color: '#00ff87',
+              gap: 10,
+              padding: '8px 18px',
+              border: '1px solid rgba(0,0,0,0.12)',
+              borderRadius: 999,
+              color: '#111',
+              fontSize: 14,
+              letterSpacing: 3,
+              fontWeight: 500,
+              fontFamily: 'Syne',
             }}
           >
-            ✓
-          </div>
-          <div
-            style={{
-              fontSize: '48px',
-              fontWeight: 800,
-              fontStyle: 'italic',
-              color: '#ffffff',
-            }}
-          >
-            <span style={{ color: 'rgba(255,255,255,0.7)' }}>zk</span>
-            <span>Truth</span>
+            <div style={{ width: 8, height: 8, borderRadius: 8, background: '#00c864' }} />
+            VERIFIED · WORLD CHAIN
           </div>
         </div>
 
-        <div
-          style={{
-            fontSize: '28px',
-            fontWeight: 700,
-            color: '#00ff87',
-            marginBottom: '16px',
-          }}
-        >
-          Verified Proof of Capture
-        </div>
+        {/* Hero: the official brand lockup, sized to leave clear room for
+            the tagline & footer rows below. Source PNG is pre-cropped
+            (1100×446) so dimensions here map 1:1 with the visible logo.
+            Satori needs the dimensions in `style` as well as the HTML
+            attributes or it collapses the <img>. */}
+        {logoDataUrl ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img
+            src={logoDataUrl}
+            alt="zkTruth"
+            width={860}
+            height={349}
+            style={{ width: 860, height: 349, display: 'flex' }}
+          />
+        ) : (
+          <div style={{ fontSize: 120, color: '#000', fontWeight: 800 }}>zkTruth</div>
+        )}
 
-        <div
-          style={{
-            fontSize: '16px',
-            color: '#00c8ff',
-            opacity: 0.8,
-          }}
-        >
-          SHA-256: {hash}...
-        </div>
-
+        {/* Tagline — uses the same Syne family as the brand wordmark for
+            typographic continuity. */}
         <div
           style={{
             display: 'flex',
-            gap: '24px',
-            marginTop: '32px',
-            fontSize: '14px',
-            color: 'rgba(255,255,255,0.4)',
-            letterSpacing: '2px',
+            flexDirection: 'column',
+            alignItems: 'center',
+            gap: 14,
           }}
         >
-          <span>WORLD CHAIN</span>
-          <span>•</span>
-          <span>WORLD ID :: ZKP</span>
+          <div style={{ width: 96, height: 1, background: 'rgba(0,0,0,0.18)' }} />
+          <div
+            style={{
+              fontSize: 36,
+              fontWeight: 700,
+              color: '#111',
+              letterSpacing: 8,
+              fontFamily: 'Syne',
+            }}
+          >
+            Proof of Capture
+          </div>
+        </div>
+
+        {/* Footer: minimal monospaced metadata row. */}
+        <div
+          style={{
+            width: '100%',
+            display: 'flex',
+            justifyContent: 'center',
+            alignItems: 'center',
+            gap: 16,
+            color: 'rgba(0,0,0,0.45)',
+            fontSize: 13,
+            letterSpacing: 3,
+            fontFamily: 'monospace',
+          }}
+        >
+          <span>SHA-256</span>
+          <span>·</span>
+          <span>{shortHash}</span>
+          <span>·</span>
+          <span>ZKP VERIFIED</span>
         </div>
       </div>
     ),
-    { ...size }
+    {
+      ...size,
+      fonts: [
+        ...(syneMedium.length ? [{ name: 'Syne', data: syneMedium, weight: 500 as const, style: 'normal' as const }] : []),
+        ...(syneBold.length ? [{ name: 'Syne', data: syneBold, weight: 700 as const, style: 'normal' as const }] : []),
+      ],
+    }
   )
 }
