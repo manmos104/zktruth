@@ -32,8 +32,12 @@ export function WorldIdVerifyButton({
   onError,
   className,
 }: Props) {
+  // New app `zkTruth Verify` registered Jun 10 2026.
+  // - APP ID: app_1e1334283f3c12386ee55c5617ff5972
+  // - RP ID:  rp_5c50700e68b83094 (used by World ID 4.0)
+  // - Mode:   Managed (Developer Portal handles signer keys server-side).
   const appId = (process.env.NEXT_PUBLIC_WORLD_APP_ID ||
-    'app_29bbb24bbdc571dc7814a6c088347576') as `app_${string}`
+    'app_1e1334283f3c12386ee55c5617ff5972') as `app_${string}`
   const action = process.env.NEXT_PUBLIC_WORLD_ACTION || 'capture-proof'
 
   // Called by IDKit before onSuccess. Must throw on failure so IDKit shows an

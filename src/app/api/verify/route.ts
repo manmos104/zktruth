@@ -1,7 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server'
 
-const APP_ID = 'app_29bbb24bbdc571dc7814a6c088347576'
-const ACTION = 'capture-proof'
+// New app `zkTruth Verify` (registered Jun 10 2026, Managed/World ID 4.0).
+// Falls back to env var if set so we can hot-swap without redeploys.
+const APP_ID = process.env.WORLD_APP_ID || 'app_1e1334283f3c12386ee55c5617ff5972'
+const ACTION = process.env.WORLD_ACTION || 'capture-proof'
 
 export async function POST(req: NextRequest) {
   try {
