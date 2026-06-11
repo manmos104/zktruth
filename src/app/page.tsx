@@ -1493,6 +1493,23 @@ export default function Home() {
   const [capturedVideoUrl, setCapturedVideoUrl] = useState<string | null>(null);
 
   useEffect(() => {
+    // If we're returning from a World App auto-redirect, the snapshot will
+    // restore us to the share screen. The splash animation in that case is
+    // pure friction — jump straight to its end state so the user lands on
+    // the share screen immediately. Detected by the presence of any
+    // meaningful in-flight snapshot in localStorage.
+    if (typeof window !== 'undefined') {
+      try {
+        const raw = localStorage.getItem(SNAPSHOT_KEY);
+        if (raw) {
+          const snap = JSON.parse(raw) as { proofData?: unknown; worldIdVerified?: boolean };
+          if (snap?.proofData || snap?.worldIdVerified) {
+            setSplashPhase(4);
+            return;
+          }
+        }
+      } catch { /* fall through to normal splash */ }
+    }
     setSplashPhase(1);
     const t1 = setTimeout(() => setSplashPhase(2), 1700);
     const t2 = setTimeout(() => setSplashPhase(3), 3800);
