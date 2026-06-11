@@ -40,18 +40,44 @@ export async function POST(req: NextRequest) {
 
     if (response.ok) {
       // Worldcoin v4 success returns { success: true, action, nullifier, ... }
+      // For session proofs the nullifier lives at
+      // responses[0].session_nullifier[0] (the tuple is
+      // [session_nullifier, generated_action]). Uniqueness proofs put it
+      // at responses[0].nullifier. We also fall back to the top-level
+      // `nullifier` field when present.
       const ok = (data && typeof data === 'object'
         ? data
         : {}) as Record<string, unknown>
-      // Fall back to extracting the nullifier from results[0] if it isn't on
-      // the top-level payload — the v4 spec sometimes nests it.
       const results = Array.isArray(ok.results) ? ok.results : []
       const first = results[0] as Record<string, unknown> | undefined
+      const sessionNullTuple = Array.isArray(first?.session_nullifier)
+        ? (first?.session_nullifier as unknown[])
+        : null
       const nullifier =
+        (sessionNullTuple?.[0] as string | undefined) ??
         (ok.nullifier as string | undefined) ??
         (first?.nullifier as string | undefined) ??
         null
-      return NextResponse.json({ success: true, nullifier_hash: nullifier })
+      // Also pull it from idkitResponse directly in case the verify
+      // endpoint returns a thin success envelope.
+      const fromInput = (() => {
+        const r = Array.isArray(idkitResponse?.responses)
+          ? idkitResponse.responses[0]
+          : null
+        if (!r) return null
+        const stuple = Array.isArray((r as Record<string, unknown>).session_nullifier)
+          ? ((r as Record<string, unknown>).session_nullifier as unknown[])
+          : null
+        return (
+          (stuple?.[0] as string | undefined) ??
+          ((r as Record<string, unknown>).nullifier as string | undefined) ??
+          null
+        )
+      })()
+      return NextResponse.json({
+        success: true,
+        nullifier_hash: nullifier ?? fromInput,
+      })
     }
 
     const err = (data && typeof data === 'object'

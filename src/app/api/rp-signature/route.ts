@@ -18,7 +18,8 @@ import { signRequest } from '@worldcoin/idkit-core/signing'
  */
 export async function POST(req: NextRequest) {
   try {
-    const { action } = await req.json()
+    const body = await req.json().catch(() => ({}))
+    const action: string | undefined = body?.action
     const signingKeyHex = process.env.RP_SIGNING_KEY
     if (!signingKeyHex) {
       return NextResponse.json(
@@ -27,10 +28,12 @@ export async function POST(req: NextRequest) {
       )
     }
 
-    const { sig, nonce, createdAt, expiresAt } = signRequest({
-      signingKeyHex,
-      action: action ?? undefined,
-    })
+    // For session proofs we deliberately omit `action` so the signature
+    // matches the session message format. For uniqueness proofs (legacy
+    // path), pass `action` and it will be hashed into the signature.
+    const { sig, nonce, createdAt, expiresAt } = signRequest(
+      action ? { signingKeyHex, action } : { signingKeyHex },
+    )
 
     return NextResponse.json({
       sig,
