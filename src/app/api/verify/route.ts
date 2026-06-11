@@ -1,75 +1,35 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { randomBytes } from 'crypto'
 
 /**
- * /api/verify — Worldcoin verify proxy.
+ * /api/verify — proxies a v4 IDKitResult straight to Worldcoin's v4 verify
+ * endpoint and unwraps the response.
  *
- * The app `zkTruth Verify` (app_1e1334283f3c12386ee55c5617ff5972) is
- * registered as World ID 4.0 / Managed. The legacy v2 verify endpoint
- * (developer.worldcoin.org/api/v2/verify/...) returns "Action not found"
- * for 4.0-registered actions, so we must hit the new v4 endpoint:
- *
- *   POST https://developer.world.org/api/v4/verify/{app_id}
- *
- * v4 still accepts our existing IDKit v2 proofs by wrapping them in the
- * legacy "Uniqueness proof (protocol 3.0)" request shape:
- *
- *   { protocol_version: '3.0',
- *     nonce,
- *     action,
- *     environment,
- *     responses: [{ identifier, merkle_root, nullifier, proof }] }
- *
- * Managed mode means Worldcoin signs RP requests server-side, so we don't
- * need a signer key in env vars — we just relay the proof.
+ * Worldcoin's docs (`docs.world.org` → IDKit integrate, Step 5) recommend
+ * forwarding the IDKit payload "as-is" with no field remapping, so this
+ * route is intentionally thin.
  */
 
-const APP_ID = process.env.WORLD_APP_ID || 'app_1e1334283f3c12386ee55c5617ff5972'
-const ACTION = process.env.WORLD_ACTION || 'capture-proof'
-const VERIFY_URL = `https://developer.world.org/api/v4/verify/${APP_ID}`
+const RP_ID = process.env.WORLD_RP_ID || 'rp_5c50700e68b83094'
+const VERIFY_URL = `https://developer.world.org/api/v4/verify/${RP_ID}`
 
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json()
-    const { proof, nullifier_hash, merkle_root, verification_level } = body
+    const idkitResponse = body.idkitResponse ?? body
 
-    // IDKit v2 returns 'device' or 'orb' for verification_level.
-    // The v4 endpoint's legacy `identifier` field expects the same strings.
-    const identifier = verification_level === 'orb' ? 'orb' : 'device'
-
-    // v4 endpoint requires a per-request nonce even for legacy proofs.
-    // It's a 32-byte hex used only to deduplicate replayed requests.
-    const nonce = '0x' + randomBytes(32).toString('hex')
-
-    const payload = {
-      protocol_version: '3.0' as const,
-      nonce,
-      action: ACTION,
-      environment: 'production' as const,
-      responses: [
-        {
-          identifier,
-          merkle_root,
-          nullifier: nullifier_hash,
-          proof,
-          // signal_hash omitted — the v4 schema defaults it to the hash of
-          // an empty string, which matches what World App computed because
-          // we don't pass a `signal` to IDKitWidget.
-        },
-      ],
-    }
-
-    console.log('[verify] outgoing v4 legacy proof', {
-      app_id: APP_ID,
-      action: ACTION,
-      identifier,
-      nullifier_hash,
+    console.log('[verify] forwarding to v4', {
+      rp_id: RP_ID,
+      protocol_version: idkitResponse?.protocol_version,
+      action: idkitResponse?.action,
+      response_count: Array.isArray(idkitResponse?.responses)
+        ? idkitResponse.responses.length
+        : 0,
     })
 
     const response = await fetch(VERIFY_URL, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
+      body: JSON.stringify(idkitResponse),
     })
 
     const raw = await response.text()
@@ -79,18 +39,26 @@ export async function POST(req: NextRequest) {
     console.log('[verify] worldcoin v4 response', response.status, data)
 
     if (response.ok) {
-      return NextResponse.json({ success: true, nullifier_hash })
+      // Worldcoin v4 success returns { success: true, action, nullifier, ... }
+      const ok = (data && typeof data === 'object'
+        ? data
+        : {}) as Record<string, unknown>
+      // Fall back to extracting the nullifier from results[0] if it isn't on
+      // the top-level payload — the v4 spec sometimes nests it.
+      const results = Array.isArray(ok.results) ? ok.results : []
+      const first = results[0] as Record<string, unknown> | undefined
+      const nullifier =
+        (ok.nullifier as string | undefined) ??
+        (first?.nullifier as string | undefined) ??
+        null
+      return NextResponse.json({ success: true, nullifier_hash: nullifier })
     }
 
-    // v4 error shape: { success: false, code, detail, results? }
     const err = (data && typeof data === 'object'
       ? data
       : { detail: String(data) }) as Record<string, unknown>
-
-    // results[0] often has the most specific error for legacy proofs.
-    const first = Array.isArray(err.results) && err.results.length > 0
-      ? (err.results[0] as Record<string, unknown>)
-      : null
+    const results = Array.isArray(err.results) ? err.results : []
+    const first = results[0] as Record<string, unknown> | undefined
 
     return NextResponse.json(
       {
@@ -99,7 +67,6 @@ export async function POST(req: NextRequest) {
         error: err,
         detail: first?.detail ?? err.detail ?? null,
         code: first?.code ?? err.code ?? null,
-        attribute: err.attribute ?? null,
       },
       { status: 400 },
     )

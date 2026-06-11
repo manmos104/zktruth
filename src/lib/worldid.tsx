@@ -1,19 +1,31 @@
 'use client'
 
 /**
- * WorldIdVerifyButton — wraps @worldcoin/idkit IDKitWidget.
+ * WorldIdVerifyButton — wraps @worldcoin/idkit v4's `IDKitRequestWidget`.
  *
- * Replaces the previous fake-nullifier setTimeout flow. The widget opens the
- * official World ID modal, runs the proof through our /api/verify route
- * (which talks to the Worldcoin developer-portal verify endpoint), and on
- * success returns a real nullifier_hash that can be used as the bytes32
- * argument to ZkTruthProof.mintVerifiedProof.
+ * The v4 flow:
+ *   1. Browser asks our backend (`/api/rp-signature`) to sign the request
+ *      using the RP signer key (held only on the server).
+ *   2. We hand the signed payload to `IDKitRequestWidget` as `rp_context`.
+ *   3. World App generates a v4 (or v3 legacy) proof.
+ *   4. Browser forwards the proof as-is to `/api/verify`, which posts it to
+ *      Worldcoin's `https://developer.world.org/api/v4/verify/{rp_id}`.
+ *
+ * `return_to` tells World App to auto-redirect back to Safari after the
+ * user approves the request, so the user no longer has to manually swipe
+ * back to the browser.
  */
 
-import { IDKitWidget, VerificationLevel, type ISuccessResult } from '@worldcoin/idkit'
+import { useEffect, useState } from 'react'
+import {
+  IDKitRequestWidget,
+  proofOfHuman,
+  type IDKitResult,
+  type RpContext,
+} from '@worldcoin/idkit'
 
 interface Props {
-  /** Bound to the verification — typically the SHA-256 hash of the captured media. */
+  /** Bound to the verification — accepted for API compat but not forwarded. */
   signal?: string
   verifying: boolean
   verified: boolean
@@ -23,9 +35,12 @@ interface Props {
   className?: string
 }
 
+const APP_ID = (process.env.NEXT_PUBLIC_WORLD_APP_ID ||
+  'app_1e1334283f3c12386ee55c5617ff5972') as `app_${string}`
+const RP_ID = process.env.NEXT_PUBLIC_WORLD_RP_ID || 'rp_5c50700e68b83094'
+const ACTION = process.env.NEXT_PUBLIC_WORLD_ACTION || 'capture-proof'
+
 export function WorldIdVerifyButton({
-  // `signal` accepted for backward compat but no longer forwarded — see
-  // comment in handleVerify.
   signal: _signal,
   verifying,
   verified,
@@ -34,85 +49,131 @@ export function WorldIdVerifyButton({
   onError,
   className,
 }: Props) {
-  void _signal
-  // New app `zkTruth Verify` registered Jun 10 2026.
-  // - APP ID: app_1e1334283f3c12386ee55c5617ff5972
-  // - RP ID:  rp_5c50700e68b83094 (used by World ID 4.0)
-  // - Mode:   Managed (Developer Portal handles signer keys server-side).
-  const appId = (process.env.NEXT_PUBLIC_WORLD_APP_ID ||
-    'app_1e1334283f3c12386ee55c5617ff5972') as `app_${string}`
-  const action = process.env.NEXT_PUBLIC_WORLD_ACTION || 'capture-proof'
+  void _signal // accepted for API compat
+  const [open, setOpen] = useState(false)
+  const [rpContext, setRpContext] = useState<RpContext | null>(null)
+  const [fetchingSig, setFetchingSig] = useState(false)
 
-  // Called by IDKit before onSuccess. Must throw on failure so IDKit shows an
-  // error state and does not invoke onSuccess.
-  const handleVerify = async (proof: ISuccessResult) => {
+  // The IDKit v4 widget needs a fresh signed RP context every time it opens.
+  // We lazily fetch one when the user starts a verification so we don't burn
+  // signature TTLs on idle page loads.
+  const ensureRpContext = async (): Promise<RpContext | null> => {
+    if (rpContext) return rpContext
+    setFetchingSig(true)
+    try {
+      const res = await fetch('/api/rp-signature', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: ACTION }),
+      })
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}))
+        const msg = (err && (err.error || err.detail)) || `sign request failed (${res.status})`
+        onError(String(msg))
+        return null
+      }
+      const data = await res.json() as {
+        sig: string
+        nonce: string
+        created_at: number
+        expires_at: number
+      }
+      const ctx: RpContext = {
+        rp_id: RP_ID,
+        nonce: data.nonce,
+        created_at: data.created_at,
+        expires_at: data.expires_at,
+        signature: data.sig,
+      }
+      setRpContext(ctx)
+      return ctx
+    } catch (e) {
+      onError(String(e))
+      return null
+    } finally {
+      setFetchingSig(false)
+    }
+  }
+
+  // When `open` flips to true we make sure an rp_context is loaded first.
+  useEffect(() => {
+    if (open && !rpContext) {
+      ensureRpContext()
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open])
+
+  const handleVerify = async (result: IDKitResult) => {
     const res = await fetch('/api/verify', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        proof: proof.proof,
-        nullifier_hash: proof.nullifier_hash,
-        merkle_root: proof.merkle_root,
-        verification_level: proof.verification_level,
-        // signal intentionally omitted — we no longer pass a `signal` to
-        // IDKitWidget, so the verifier's default empty signal_hash matches.
-      }),
+      body: JSON.stringify({ idkitResponse: result }),
     })
     if (!res.ok) {
-      // /api/verify now returns flattened { detail, code, attribute, worldcoin_status, error }
       const data: {
         detail?: string | null
         code?: string | null
-        attribute?: string | null
         worldcoin_status?: number
-        error?: { detail?: string; code?: string; attribute?: string } | unknown
       } = await res.json().catch(() => ({}))
-      const innerErr = (data?.error && typeof data.error === 'object'
-        ? data.error
-        : null) as { detail?: string; code?: string; attribute?: string } | null
       const msg =
         data?.detail ||
         data?.code ||
-        data?.attribute ||
-        innerErr?.detail ||
-        innerErr?.code ||
-        innerErr?.attribute ||
         `Server verification failed${data?.worldcoin_status ? ` (${data.worldcoin_status})` : ''}`
       onError(msg)
       throw new Error(msg)
     }
+    const { nullifier_hash } = (await res.json()) as { nullifier_hash: string }
+    onVerified(nullifier_hash as `0x${string}`)
   }
 
-  const onSuccess = (result: ISuccessResult) => {
-    // nullifier_hash is a 0x-prefixed bytes32 — exactly what the contract wants.
-    onVerified(result.nullifier_hash as `0x${string}`)
+  const onSuccess = (_result: IDKitResult) => {
+    // No-op: we already invoked onVerified in handleVerify, which gives us
+    // the canonical bytes32 nullifier the contract expects.
+    void _result
   }
 
-  const label = verifying ? 'VERIFYING...' : verified ? 'VERIFIED ✓' : 'VERIFY :: WORLD ID'
+  const label = verifying
+    ? fetchingSig
+      ? 'SIGNING...'
+      : 'VERIFYING...'
+    : verified
+      ? 'VERIFIED ✓'
+      : 'VERIFY :: WORLD ID'
+
+  const startFlow = async () => {
+    if (verifying || verified) return
+    onVerifying()
+    const ctx = await ensureRpContext()
+    if (!ctx) return
+    setOpen(true)
+  }
 
   return (
-    <IDKitWidget
-      app_id={appId}
-      action={action}
-      // signal intentionally omitted — see handleVerify comment. The smart
-      // contract's nullifier_hash collision check still gives us Sybil
-      // resistance per (rp_id, action, person), which is what we need.
-      handleVerify={handleVerify}
-      onSuccess={onSuccess}
-      verification_level={VerificationLevel.Device}
-    >
-      {({ open }) => (
-        <button
-          className={className ?? 'wid-verify-btn'}
-          disabled={verifying || verified}
-          onClick={() => {
-            onVerifying()
-            open()
-          }}
-        >
-          {label}
-        </button>
+    <>
+      <button
+        className={className ?? 'wid-verify-btn'}
+        disabled={verifying || verified || fetchingSig}
+        onClick={startFlow}
+      >
+        {label}
+      </button>
+      {rpContext && (
+        <IDKitRequestWidget
+          open={open}
+          onOpenChange={setOpen}
+          app_id={APP_ID}
+          action={ACTION}
+          rp_context={rpContext}
+          allow_legacy_proofs={true}
+          // Tell World App to deep-link back to our page after the user
+          // approves; this is what gives us the auto-return UX on iPhone.
+          return_to={`https://zktruth.vercel.app/?verified=1`}
+          preset={proofOfHuman({})}
+          handleVerify={handleVerify}
+          onSuccess={onSuccess}
+          autoClose
+        />
       )}
-    </IDKitWidget>
+    </>
   )
 }
