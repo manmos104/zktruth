@@ -1,37 +1,36 @@
 'use client'
 
 /**
- * WorldIdVerifyButton — Session-based World ID verification.
+ * WorldIdVerifyButton — per-photo verification with a dynamic action.
  *
- * We use IDKit v4's `IDKitSessionWidget` rather than the action-bound
- * `IDKitRequestWidget` because the latter ties a single nullifier to
- * `(person, action)`. For a Proof-of-Capture flow the same human will
- * mint many photos, and each one needs its own fresh nullifier — exactly
- * what session proofs give us (`session_nullifier` is per `(person,
- * session_id)`, and we mint a new `session_id` per verification).
+ * The Worldcoin nullifier is derived from (person, app_id, action), so to
+ * let the same human mint many verified photos we mint a fresh action per
+ * photo. The action carries a chunk of the SHA-256 capture hash so two
+ * different captures (even from the same person) produce two different
+ * nullifiers. Pre-registration in the Developer Portal is NOT required —
+ * Worldcoin treats any 1..32-char ASCII action as valid.
  *
- * Architecture:
- *   1. The browser asks `/api/rp-signature` to sign a session-style RP
- *      context (no action embedded — sessions don't carry actions).
- *   2. The signed payload + a `proof_of_human` constraint are handed to
- *      `IDKitSessionWidget`.
- *   3. World App generates a session proof; the browser polls the IDKit
- *      bridge and forwards the `IDKitResultSession` to `/api/verify`,
- *      which posts it to Worldcoin's `v4/verify/{rp_id}` endpoint.
- *   4. `return_to` brings Safari back to the foreground after the user
- *      approves in World App.
+ * Flow:
+ *   1. The browser asks `/api/rp-signature` to sign the per-photo action.
+ *   2. The signed payload is handed to `IDKitRequestWidget` as
+ *      `rp_context`.
+ *   3. World App generates a v3 (legacy) proof bound to the action.
+ *   4. The browser forwards the proof to `/api/verify`, which posts it to
+ *      Worldcoin's `v4/verify/{rp_id}` endpoint with
+ *      `protocol_version: '3.0'`.
+ *   5. `return_to` auto-redirects Safari back to the originating tab.
  */
 
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import {
-  IDKitSessionWidget,
+  IDKitRequestWidget,
+  orbLegacy,
   type IDKitResult,
-  type IDKitResultSession,
   type RpContext,
 } from '@worldcoin/idkit'
 
 interface Props {
-  /** Bound to the verification — accepted for API compat but not forwarded. */
+  /** SHA-256 of the captured media. Used to scope the action per photo. */
   signal?: string
   verifying: boolean
   verified: boolean
@@ -45,8 +44,19 @@ const APP_ID = (process.env.NEXT_PUBLIC_WORLD_APP_ID ||
   'app_1e1334283f3c12386ee55c5617ff5972') as `app_${string}`
 const RP_ID = process.env.NEXT_PUBLIC_WORLD_RP_ID || 'rp_5c50700e68b83094'
 
+/**
+ * Build a unique-per-photo action identifier. World App accepts arbitrary
+ * action strings up to 32 ASCII characters; we use a stable `cap-` prefix
+ * plus 28 chars of the capture hash (stripping any 0x prefix) so two
+ * different photos can never collide.
+ */
+function buildAction(photoHash: string | undefined): string {
+  const clean = (photoHash || 'unknown').replace(/^0x/, '')
+  return `cap-${clean.slice(0, 28)}`
+}
+
 export function WorldIdVerifyButton({
-  signal: _signal,
+  signal,
   verifying,
   verified,
   onVerifying,
@@ -54,22 +64,21 @@ export function WorldIdVerifyButton({
   onError,
   className,
 }: Props) {
-  void _signal
   const [open, setOpen] = useState(false)
   const [rpContext, setRpContext] = useState<RpContext | null>(null)
   const [fetchingSig, setFetchingSig] = useState(false)
+  const action = buildAction(signal)
+  // Track which action the current rpContext was signed for so a new
+  // capture invalidates a stale signature.
+  const signedActionRef = useRef<string | null>(null)
 
-  // Fetch a fresh session-mode signed RP context. We bust whatever we had
-  // cached from a previous verification because each new photo gets a
-  // fresh session.
-  const fetchRpContext = async (): Promise<RpContext | null> => {
+  const fetchRpContext = async (forAction: string): Promise<RpContext | null> => {
     setFetchingSig(true)
     try {
       const res = await fetch('/api/rp-signature', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        // Note: no `action` — session proofs are not action-bound.
-        body: JSON.stringify({}),
+        body: JSON.stringify({ action: forAction }),
       })
       if (!res.ok) {
         const err = await res.json().catch(() => ({}))
@@ -91,6 +100,7 @@ export function WorldIdVerifyButton({
         signature: data.sig,
       }
       setRpContext(ctx)
+      signedActionRef.current = forAction
       return ctx
     } catch (e) {
       onError(String(e))
@@ -100,17 +110,14 @@ export function WorldIdVerifyButton({
     }
   }
 
-  // If the user (re-)opens the widget, make sure we have a context for it.
+  // If the widget is open and we don't yet have a matching context, fetch.
   useEffect(() => {
-    if (open && !rpContext) {
-      fetchRpContext()
+    if (open && (!rpContext || signedActionRef.current !== action)) {
+      fetchRpContext(action)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open])
+  }, [open, action])
 
-  // IDKit calls handleVerify with the proof payload before resolving the
-  // widget. We forward to our verify proxy and surface a clean error if
-  // the v4 endpoint rejects.
   const handleVerify = async (result: IDKitResult) => {
     const res = await fetch('/api/verify', {
       method: 'POST',
@@ -134,9 +141,7 @@ export function WorldIdVerifyButton({
     onVerified(nullifier_hash as `0x${string}`)
   }
 
-  const onSuccess = (_result: IDKitResultSession) => {
-    // No-op — handleVerify already invoked onVerified with the canonical
-    // bytes32 nullifier that the smart contract expects.
+  const onSuccess = (_result: IDKitResult) => {
     void _result
   }
 
@@ -151,9 +156,7 @@ export function WorldIdVerifyButton({
   const startFlow = async () => {
     if (verifying || verified) return
     onVerifying()
-    // Always refetch — a session signature is single-use, and re-using
-    // one across photos gives nondeterministic results.
-    const ctx = await fetchRpContext()
+    const ctx = await fetchRpContext(action)
     if (!ctx) return
     setOpen(true)
   }
@@ -167,16 +170,17 @@ export function WorldIdVerifyButton({
       >
         {label}
       </button>
-      {rpContext && (
-        <IDKitSessionWidget
+      {rpContext && signedActionRef.current === action && (
+        <IDKitRequestWidget
           open={open}
           onOpenChange={setOpen}
           app_id={APP_ID}
+          action={action}
           rp_context={rpContext}
-          // `proof_of_human` constraint = "any World ID-verified human can
-          // satisfy this". No document or selfie required.
-          constraints={{ type: 'proof_of_human' }}
-          // Deep-link Safari back to the originating tab after approval.
+          allow_legacy_proofs={true}
+          // `orbLegacy` works with v3 World IDs (device or orb level). For
+          // Proof-of-Capture we don't need a higher tier of identity.
+          preset={orbLegacy({})}
           return_to={
             typeof window !== 'undefined'
               ? window.location.href
