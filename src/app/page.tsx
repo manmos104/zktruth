@@ -1404,7 +1404,7 @@ export default function Home() {
   const [snsFromScreen, setSnsFromScreen] = useState("share");
   const [copyStatus, setCopyStatus] = useState("");
 
-  // Snapshot key for sessionStorage. World App's auto-redirect after
+  // Snapshot key for localStorage. World App's auto-redirect after
   // verification re-loads the page in a fresh tab, dropping React state.
   // We snapshot enough of the flow's progress to land the user back on
   // the screen they were on, instead of the camera.
@@ -1418,7 +1418,7 @@ export default function Home() {
     restoredRef.current = true;
     if (typeof window === 'undefined') return;
     try {
-      const raw = sessionStorage.getItem(SNAPSHOT_KEY);
+      const raw = localStorage.getItem(SNAPSHOT_KEY);
       if (!raw) return;
       const snap = JSON.parse(raw) as {
         screen?: string;
@@ -1459,9 +1459,9 @@ export default function Home() {
         mintMode,
         capturedImage,
       };
-      sessionStorage.setItem(SNAPSHOT_KEY, JSON.stringify(snap));
+      localStorage.setItem(SNAPSHOT_KEY, JSON.stringify(snap));
     } catch {
-      // sessionStorage may be full or disabled — best-effort
+      // localStorage may be full or disabled — best-effort
     }
   }, [screen, proofData, worldIdVerified, worldIdNullifier, mintMode, capturedImage]);
 
@@ -2093,7 +2093,7 @@ export default function Home() {
     // Reset → drop the persisted flow snapshot so the next visit starts
     // clean instead of restoring this finished session.
     if (typeof window !== 'undefined') {
-      try { sessionStorage.removeItem(SNAPSHOT_KEY); } catch { /* ignore */ }
+      try { localStorage.removeItem(SNAPSHOT_KEY); } catch { /* ignore */ }
     }
     if (recordingTimerRef.current) clearInterval(recordingTimerRef.current);
     if (recAnimFrameRef.current) cancelAnimationFrame(recAnimFrameRef.current);
