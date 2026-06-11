@@ -1404,6 +1404,67 @@ export default function Home() {
   const [snsFromScreen, setSnsFromScreen] = useState("share");
   const [copyStatus, setCopyStatus] = useState("");
 
+  // Snapshot key for sessionStorage. World App's auto-redirect after
+  // verification re-loads the page in a fresh tab, dropping React state.
+  // We snapshot enough of the flow's progress to land the user back on
+  // the screen they were on, instead of the camera.
+  const SNAPSHOT_KEY = 'zktruth_flow_snapshot_v1';
+
+  // Restore snapshot on first mount. Uses a one-shot ref so React's strict
+  // mode double-invocation doesn't double-restore.
+  const restoredRef = useRef(false);
+  useEffect(() => {
+    if (restoredRef.current) return;
+    restoredRef.current = true;
+    if (typeof window === 'undefined') return;
+    try {
+      const raw = sessionStorage.getItem(SNAPSHOT_KEY);
+      if (!raw) return;
+      const snap = JSON.parse(raw) as {
+        screen?: string;
+        proofData?: unknown;
+        worldIdVerified?: boolean;
+        worldIdNullifier?: string | null;
+        mintMode?: string;
+        capturedImage?: string | null;
+      };
+      if (snap.proofData) setProofData(snap.proofData);
+      if (snap.capturedImage) setCapturedImage(snap.capturedImage);
+      if (snap.worldIdVerified) setWorldIdVerified(true);
+      if (snap.worldIdNullifier) setWorldIdNullifier(snap.worldIdNullifier);
+      if (snap.mintMode) setMintMode(snap.mintMode);
+      // Drive the user back to the share screen if we got far enough,
+      // otherwise the world-id screen so they can re-verify.
+      if (snap.worldIdVerified && snap.proofData) {
+        setScreen('share');
+      } else if (snap.proofData) {
+        setScreen('worldid');
+      }
+    } catch {
+      // ignore parse errors; treat as no snapshot
+    }
+  }, []);
+
+  // Persist the key bits of state every time they change. Skipped on the
+  // very first mount because we have nothing meaningful yet.
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    if (!proofData && !worldIdVerified) return;
+    try {
+      const snap = {
+        screen,
+        proofData,
+        worldIdVerified,
+        worldIdNullifier,
+        mintMode,
+        capturedImage,
+      };
+      sessionStorage.setItem(SNAPSHOT_KEY, JSON.stringify(snap));
+    } catch {
+      // sessionStorage may be full or disabled — best-effort
+    }
+  }, [screen, proofData, worldIdVerified, worldIdNullifier, mintMode, capturedImage]);
+
   const [facingMode, setFacingMode] = useState<"environment"|"user">("environment");
   const [zoomLevel, setZoomLevel] = useState(0.5);
   const [gpsCoords, setGpsCoords] = useState<string>("Acquiring GPS…");
@@ -2029,6 +2090,11 @@ export default function Home() {
     setScreen("camera"); setMintComplete(false); setCapturedImage(null); setCapturedVideo(null); setProofData(null);
     setTxHash(null); setRecording(false); setWorldIdVerified(false); setWorldIdVerifying(false);
     setWorldIdNullifier(null); setMintMode("verified");
+    // Reset → drop the persisted flow snapshot so the next visit starts
+    // clean instead of restoring this finished session.
+    if (typeof window !== 'undefined') {
+      try { sessionStorage.removeItem(SNAPSHOT_KEY); } catch { /* ignore */ }
+    }
     if (recordingTimerRef.current) clearInterval(recordingTimerRef.current);
     if (recAnimFrameRef.current) cancelAnimationFrame(recAnimFrameRef.current);
     recAnimFrameRef.current = null;

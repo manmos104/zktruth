@@ -167,7 +167,15 @@ export function WorldIdVerifyButton({
           allow_legacy_proofs={true}
           // Tell World App to deep-link back to our page after the user
           // approves; this is what gives us the auto-return UX on iPhone.
-          return_to={`https://zktruth.vercel.app/?verified=1`}
+          // We use the current page URL exactly so iOS Safari refocuses the
+          // existing tab whenever possible (otherwise it would open a fresh
+          // tab and the page-level sessionStorage snapshot would still
+          // restore us, but tab-focus is the better UX).
+          return_to={
+            typeof window !== 'undefined'
+              ? window.location.href
+              : 'https://zktruth.vercel.app/'
+          }
           preset={proofOfHuman({})}
           handleVerify={handleVerify}
           onSuccess={onSuccess}
