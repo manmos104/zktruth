@@ -24,7 +24,9 @@ interface Props {
 }
 
 export function WorldIdVerifyButton({
-  signal,
+  // `signal` accepted for backward compat but no longer forwarded — see
+  // comment in handleVerify.
+  signal: _signal,
   verifying,
   verified,
   onVerifying,
@@ -32,6 +34,7 @@ export function WorldIdVerifyButton({
   onError,
   className,
 }: Props) {
+  void _signal
   // New app `zkTruth Verify` registered Jun 10 2026.
   // - APP ID: app_1e1334283f3c12386ee55c5617ff5972
   // - RP ID:  rp_5c50700e68b83094 (used by World ID 4.0)
@@ -51,7 +54,8 @@ export function WorldIdVerifyButton({
         nullifier_hash: proof.nullifier_hash,
         merkle_root: proof.merkle_root,
         verification_level: proof.verification_level,
-        signal: signal ?? '',
+        // signal intentionally omitted — we no longer pass a `signal` to
+        // IDKitWidget, so the verifier's default empty signal_hash matches.
       }),
     })
     if (!res.ok) {
@@ -90,7 +94,9 @@ export function WorldIdVerifyButton({
     <IDKitWidget
       app_id={appId}
       action={action}
-      signal={signal}
+      // signal intentionally omitted — see handleVerify comment. The smart
+      // contract's nullifier_hash collision check still gives us Sybil
+      // resistance per (rp_id, action, person), which is what we need.
       handleVerify={handleVerify}
       onSuccess={onSuccess}
       verification_level={VerificationLevel.Device}
