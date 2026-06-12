@@ -1409,6 +1409,12 @@ export default function Home() {
   // We snapshot enough of the flow's progress to land the user back on
   // the screen they were on, instead of the camera.
   const SNAPSHOT_KEY = 'zktruth_flow_snapshot_v1';
+  // Time-to-live for the snapshot, in milliseconds. The snapshot only
+  // exists to bridge the few seconds between the World-App auto-redirect
+  // and Safari refocusing/reloading our page; if the user comes back via
+  // a fresh URL hit hours or days later, the snapshot should be ignored
+  // and we should boot into the normal splash → camera flow.
+  const SNAPSHOT_TTL_MS = 5 * 60 * 1000; // 5 minutes
 
   // Restore snapshot on first mount. Uses a one-shot ref so React's strict
   // mode double-invocation doesn't double-restore.
@@ -1427,7 +1433,14 @@ export default function Home() {
         worldIdNullifier?: string | null;
         mintMode?: string;
         capturedImage?: string | null;
+        savedAt?: number;
       };
+      // TTL gate — old snapshots are discarded so a stale flow doesn't
+      // hijack a brand-new visit.
+      if (typeof snap.savedAt !== 'number' || Date.now() - snap.savedAt > SNAPSHOT_TTL_MS) {
+        localStorage.removeItem(SNAPSHOT_KEY);
+        return;
+      }
       if (snap.proofData) setProofData(snap.proofData);
       if (snap.capturedImage) setCapturedImage(snap.capturedImage);
       if (snap.worldIdVerified) setWorldIdVerified(true);
@@ -1458,6 +1471,8 @@ export default function Home() {
         worldIdNullifier,
         mintMode,
         capturedImage,
+        // Saved-at so the restore path above can age it out.
+        savedAt: Date.now(),
       };
       localStorage.setItem(SNAPSHOT_KEY, JSON.stringify(snap));
     } catch {
@@ -1496,14 +1511,16 @@ export default function Home() {
     // If we're returning from a World App auto-redirect, the snapshot will
     // restore us to the share screen. The splash animation in that case is
     // pure friction — jump straight to its end state so the user lands on
-    // the share screen immediately. Detected by the presence of any
-    // meaningful in-flight snapshot in localStorage.
+    // the share screen immediately. Only skips for FRESH snapshots
+    // (within SNAPSHOT_TTL_MS) so that returning to the URL hours later
+    // shows the normal splash → camera intro again.
     if (typeof window !== 'undefined') {
       try {
         const raw = localStorage.getItem(SNAPSHOT_KEY);
         if (raw) {
-          const snap = JSON.parse(raw) as { proofData?: unknown; worldIdVerified?: boolean };
-          if (snap?.proofData || snap?.worldIdVerified) {
+          const snap = JSON.parse(raw) as { proofData?: unknown; worldIdVerified?: boolean; savedAt?: number };
+          const fresh = typeof snap?.savedAt === 'number' && Date.now() - snap.savedAt <= SNAPSHOT_TTL_MS;
+          if (fresh && (snap?.proofData || snap?.worldIdVerified)) {
             setSplashPhase(4);
             return;
           }
