@@ -2029,100 +2029,22 @@ export default function Home() {
       }
       setRecording(false);
     } else {
-      // Start recording — canvas-based for 9:16 fullscreen
-      if (!streamRef.current || !videoRef.current) return;
+      // Start recording — record straight off the camera MediaStream.
+      //
+      // We used to compose a canvas-based stream (so the recording could
+      // pre-bake the portrait crop, digital zoom, and front-camera mirror
+      // exactly as the preview showed them). iOS Safari's MediaRecorder
+      // silently drops the audio track whenever the video track originates
+      // from a canvas — confirmed even with the new MediaStream() + Web
+      // Audio API workarounds. Recording the raw camera stream is the only
+      // path that reliably produces a clip with sound; we accept the
+      // trade-off of losing the canvas-applied visual transforms because
+      // Proof-of-Capture cares more about the authentic camera frame.
+      if (!streamRef.current) return;
       recordedChunksRef.current = [];
       setCapturedVideo(null);
 
-      const v = videoRef.current;
-      const pw = 1080, ph = 1920; // 9:16 portrait
-
-      // Create offscreen canvas for portrait recording
-      if (!recCanvasRef.current) {
-        recCanvasRef.current = document.createElement('canvas');
-      }
-      const rc = recCanvasRef.current;
-      rc.width = pw;
-      rc.height = ph;
-      const ctx = rc.getContext('2d');
-      if (!ctx) return;
-
-      // Draw loop: video → canvas in cover mode
-      const drawFrame = () => {
-        const vw = v.videoWidth || 1080;
-        const vh = v.videoHeight || 1920;
-        const vr = vw / vh;
-        const cr = pw / ph;
-        let sx = 0, sy = 0, sw = vw, sh = vh;
-        if (vr > cr) { sw = vh * cr; sx = (vw - sw) / 2; }
-        else { sh = vw / cr; sy = (vh - sh) / 2; }
-
-        // Apply digital zoom — matches the preview's displayScale so the
-        // captured image frames exactly what the user saw. Below the lens's
-        // base FOV (e.g. 0.5x on ultra-wide, 0.7x on front-wide) scale stays
-        // at 1 and we just hand back the full sensor frame.
-        const z = displayScale;
-        if (z > 1) {
-          const zw = sw / z, zh = sh / z;
-          sx += (sw - zw) / 2; sy += (sh - zh) / 2;
-          sw = zw; sh = zh;
-        }
-
-        // Mirror for front camera
-        ctx.save();
-        if (facingMode === 'user') {
-          ctx.translate(pw, 0);
-          ctx.scale(-1, 1);
-        }
-        ctx.drawImage(v, sx, sy, sw, sh, 0, 0, pw, ph);
-        ctx.restore();
-
-        recAnimFrameRef.current = requestAnimationFrame(drawFrame);
-      };
-      drawFrame();
-
-      // Capture video stream from canvas
-      const canvasStream = rc.captureStream(30);
-
-      // iOS Safari's MediaRecorder ignores audio tracks attached directly
-      // via canvasStream.addTrack(). Routing the mic stream through Web
-      // Audio API and exporting it from a MediaStreamDestination produces
-      // an audio track Safari actually encodes. We hold the AudioContext
-      // alive on a ref so the destination's track stays valid for the
-      // entire recording, and tear it down on stop.
-      const mediaAudioTracks = streamRef.current.getAudioTracks().filter(t => t.readyState === 'live');
-      let audioTracksForStream: MediaStreamTrack[] = []
-      let audioCtxForRecording: AudioContext | null = null
-      if (mediaAudioTracks.length > 0) {
-        try {
-          const Ctor: typeof AudioContext =
-            window.AudioContext ||
-            (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext
-          audioCtxForRecording = new Ctor()
-          // Some browsers (Safari) require an explicit resume from a user
-          // gesture before the context produces samples. Recording was
-          // triggered by a tap so this is safe.
-          if (audioCtxForRecording.state === 'suspended') {
-            audioCtxForRecording.resume().catch(() => {})
-          }
-          const source = audioCtxForRecording.createMediaStreamSource(streamRef.current)
-          const destination = audioCtxForRecording.createMediaStreamDestination()
-          source.connect(destination)
-          audioTracksForStream = destination.stream.getAudioTracks()
-        } catch (e) {
-          // If anything in the Web Audio path fails, fall back to the
-          // direct track copy. Worst case we lose audio (we already
-          // know iOS doesn't honor that), but video still records.
-          console.warn('[record] AudioContext setup failed', e)
-          audioTracksForStream = mediaAudioTracks
-        }
-      }
-      audioCtxRef.current = audioCtxForRecording
-
-      const recordStream = new MediaStream([
-        ...canvasStream.getVideoTracks(),
-        ...audioTracksForStream,
-      ]);
+      const recordStream = streamRef.current;
 
       // Try MIME strings that explicitly pair a video codec with an audio
       // codec first; iOS Safari otherwise tends to silently drop the audio
@@ -2143,7 +2065,9 @@ export default function Home() {
       }
 
       // Surface diagnostics on-screen so we can see them on iPhone too.
-      const diag = `mic:${mediaAudioTracks.length}/${streamRef.current.getAudioTracks().length} ctx:${audioCtxForRecording ? 'ok' : 'no'} out:${recordStream.getAudioTracks().length} mime:${selectedMime || '(default)'}`
+      const audioTracks = recordStream.getAudioTracks();
+      const liveAudio = audioTracks.filter(t => t.readyState === 'live').length;
+      const diag = `mic:${liveAudio}/${audioTracks.length} mode:raw mime:${selectedMime || '(default)'}`
       console.log('[record]', diag)
       setRecordDebug(diag)
 
@@ -2153,11 +2077,10 @@ export default function Home() {
           if (e.data.size > 0) recordedChunksRef.current.push(e.data);
         };
         recorder.onstop = () => {
-          // Stop draw loop
+          // Belt-and-braces cleanup for any leftover refs from previous
+          // canvas/AudioContext-based recording paths.
           if (recAnimFrameRef.current) cancelAnimationFrame(recAnimFrameRef.current);
           recAnimFrameRef.current = null;
-          // Release the AudioContext so the mic isn't held open after
-          // the recording finishes.
           if (audioCtxRef.current) {
             try { audioCtxRef.current.close() } catch { /* ignore */ }
             audioCtxRef.current = null;
