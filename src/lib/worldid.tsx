@@ -157,10 +157,12 @@ export function WorldIdVerifyButton({
     }
   }
 
-  // On first mount, try to restore a persisted RP context. If it's for the
-  // same action as the current photo and the verification hasn't completed,
-  // we auto-open the widget so its polling can pick up the proof that
-  // World App may already have left on the bridge.
+  // On first mount, hydrate the persisted RP context if it's still valid
+  // for the current photo. We DON'T auto-open the widget — IDKit's mobile
+  // path auto-deep-links to World App as soon as the modal opens, which
+  // would force the user through a redundant second verification cycle.
+  // Instead, keeping the context around just lets a manual re-tap reuse
+  // the existing signature (skipping the /api/rp-signature roundtrip).
   useEffect(() => {
     if (autoResumedRef.current) return
     autoResumedRef.current = true
@@ -174,9 +176,6 @@ export function WorldIdVerifyButton({
     }
     setRpContext(persisted.ctx)
     signedActionRef.current = persisted.action
-    // Defer the auto-open by a tick so the widget can mount first.
-    onVerifying()
-    setOpen(true)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
@@ -231,6 +230,13 @@ export function WorldIdVerifyButton({
   const startFlow = async () => {
     if (verifying || verified) return
     onVerifying()
+    // Reuse the existing rp_context if it was hydrated from localStorage
+    // for this same photo (saves the /api/rp-signature roundtrip on
+    // user-initiated retries after a cold restore).
+    if (rpContext && signedActionRef.current === action) {
+      setOpen(true)
+      return
+    }
     const ctx = await fetchRpContext(action)
     if (!ctx) return
     setOpen(true)
