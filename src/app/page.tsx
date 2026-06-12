@@ -1619,13 +1619,27 @@ export default function Home() {
       } else {
         video = { facingMode: facing || facingMode, width: { ideal: 1080 }, height: { ideal: 1920 } };
       }
-      const constraints: MediaStreamConstraints = { video, audio: false };
+      // Request the microphone alongside the camera so MediaRecorder can
+      // pick up the audio track when the user records a video. We mute the
+      // <video> element below so the live preview doesn't echo, but the
+      // audio track stays on the stream for recording.
+      const constraints: MediaStreamConstraints = {
+        video,
+        audio: {
+          echoCancellation: true,
+          noiseSuppression: true,
+        },
+      };
       const stream = await navigator.mediaDevices.getUserMedia(constraints);
       streamRef.current = stream;
       if (videoRef.current) {
         videoRef.current.srcObject = stream;
         videoRef.current.setAttribute('playsinline', 'true');
         videoRef.current.setAttribute('webkit-playsinline', 'true');
+        // Mute the live preview so the user doesn't hear feedback /
+        // echo through the speaker. The audio track stays on the stream
+        // and is still picked up by MediaRecorder for the saved clip.
+        videoRef.current.muted = true;
         try { await videoRef.current.play(); } catch { /* Safari autoplay policy */ }
         setCameraReady(true);
         setSimMode(false);
