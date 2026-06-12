@@ -2046,19 +2046,22 @@ export default function Home() {
 
       const recordStream = streamRef.current;
 
-      // Try MIME strings that explicitly pair a video codec with an audio
-      // codec first; iOS Safari otherwise tends to silently drop the audio
-      // track even when MediaRecorder claims the bare `video/mp4` type is
-      // supported.
+      // Probe what iOS Safari actually accepts. We don't trust
+      // isTypeSupported() to imply audio inclusion, so we display every
+      // result on screen and try bare `video/mp4` first this time — some
+      // builds of Safari include audio with the default codec selection
+      // but drop it when an explicit `mp4a.*` profile is requested.
       const mimeTypes = [
-        'video/mp4;codecs=avc1.42E01E,mp4a.40.2',
-        'video/mp4;codecs=avc1,mp4a',
-        'video/webm;codecs=h264,opus',
-        'video/webm;codecs=vp9,opus',
-        'video/webm;codecs=vp8,opus',
         'video/mp4',
+        'video/mp4;codecs=avc1.42E01E,mp4a.40.2',
+        'video/mp4;codecs=h264,aac',
+        'video/mp4;codecs=avc1,mp4a',
+        'audio/mp4',
         'video/webm',
+        'video/webm;codecs=vp9,opus',
+        'video/webm;codecs=h264,opus',
       ];
+      const mimeSupport = mimeTypes.map(mt => `${mt.replace('video/', 'v/').replace('audio/', 'a/')}=${MediaRecorder.isTypeSupported(mt) ? 'Y' : 'N'}`).join(' ')
       let selectedMime = '';
       for (const mt of mimeTypes) {
         if (MediaRecorder.isTypeSupported(mt)) { selectedMime = mt; break; }
@@ -2066,8 +2069,12 @@ export default function Home() {
 
       // Surface diagnostics on-screen so we can see them on iPhone too.
       const audioTracks = recordStream.getAudioTracks();
+      const aTrack = audioTracks[0];
+      const audioInfo = aTrack
+        ? `enabled=${aTrack.enabled} muted=${aTrack.muted} state=${aTrack.readyState} label=${(aTrack.label || '').slice(0, 20)}`
+        : 'no-audio-track';
       const liveAudio = audioTracks.filter(t => t.readyState === 'live').length;
-      const diag = `mic:${liveAudio}/${audioTracks.length} mode:raw mime:${selectedMime || '(default)'}`
+      const diag = `mic:${liveAudio}/${audioTracks.length} mime:${selectedMime || '(default)'}\nA:${audioInfo}\nMIME:${mimeSupport}`
       console.log('[record]', diag)
       setRecordDebug(diag)
 
@@ -2320,14 +2327,15 @@ export default function Home() {
                 left: 12,
                 right: 12,
                 padding: '6px 10px',
-                background: 'rgba(0,0,0,0.55)',
+                background: 'rgba(0,0,0,0.72)',
                 border: '1px solid rgba(255,255,255,0.18)',
                 borderRadius: 8,
                 color: '#e6e6e6',
                 fontFamily: 'Space Mono, monospace',
-                fontSize: 10,
+                fontSize: 9,
                 lineHeight: 1.35,
                 zIndex: 5,
+                whiteSpace: 'pre-line',
                 wordBreak: 'break-all',
               }}>
                 {recordDebug}
