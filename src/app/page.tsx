@@ -1403,6 +1403,9 @@ export default function Home() {
   const [mintMode, setMintMode] = useState("verified");
   const [snsFromScreen, setSnsFromScreen] = useState("share");
   const [copyStatus, setCopyStatus] = useState("");
+  // On-screen recorder diagnostics for debugging audio capture on devices
+  // where we don't have access to a JS console (e.g., iPhone Safari).
+  const [recordDebug, setRecordDebug] = useState<string>("");
 
   // Snapshot key for localStorage. World App's auto-redirect after
   // verification re-loads the page in a fresh tab, dropping React state.
@@ -1504,6 +1507,9 @@ export default function Home() {
   const recordedChunksRef = useRef<Blob[]>([]);
   const recCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const recAnimFrameRef = useRef<number | null>(null);
+  // AudioContext lives only for the duration of a single recording so it
+  // doesn't leak resources or hold the mic open longer than needed.
+  const audioCtxRef = useRef<AudioContext | null>(null);
   const [capturedVideo, setCapturedVideo] = useState<Blob | null>(null);
   const [capturedVideoUrl, setCapturedVideoUrl] = useState<string | null>(null);
 
@@ -2078,27 +2084,53 @@ export default function Home() {
       // Capture video stream from canvas
       const canvasStream = rc.captureStream(30);
 
-      // Build a fresh MediaStream that combines canvas video + mic audio.
-      // iOS Safari's MediaRecorder is finicky about audio tracks attached
-      // via canvasStream.addTrack(); constructing a new stream with both
-      // track sets in the constructor is the reliable path.
-      const audioTracks = streamRef.current.getAudioTracks().filter(t => t.readyState === 'live');
+      // iOS Safari's MediaRecorder ignores audio tracks attached directly
+      // via canvasStream.addTrack(). Routing the mic stream through Web
+      // Audio API and exporting it from a MediaStreamDestination produces
+      // an audio track Safari actually encodes. We hold the AudioContext
+      // alive on a ref so the destination's track stays valid for the
+      // entire recording, and tear it down on stop.
+      const mediaAudioTracks = streamRef.current.getAudioTracks().filter(t => t.readyState === 'live');
+      let audioTracksForStream: MediaStreamTrack[] = []
+      let audioCtxForRecording: AudioContext | null = null
+      if (mediaAudioTracks.length > 0) {
+        try {
+          const Ctor: typeof AudioContext =
+            window.AudioContext ||
+            (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext
+          audioCtxForRecording = new Ctor()
+          // Some browsers (Safari) require an explicit resume from a user
+          // gesture before the context produces samples. Recording was
+          // triggered by a tap so this is safe.
+          if (audioCtxForRecording.state === 'suspended') {
+            audioCtxForRecording.resume().catch(() => {})
+          }
+          const source = audioCtxForRecording.createMediaStreamSource(streamRef.current)
+          const destination = audioCtxForRecording.createMediaStreamDestination()
+          source.connect(destination)
+          audioTracksForStream = destination.stream.getAudioTracks()
+        } catch (e) {
+          // If anything in the Web Audio path fails, fall back to the
+          // direct track copy. Worst case we lose audio (we already
+          // know iOS doesn't honor that), but video still records.
+          console.warn('[record] AudioContext setup failed', e)
+          audioTracksForStream = mediaAudioTracks
+        }
+      }
+      audioCtxRef.current = audioCtxForRecording
+
       const recordStream = new MediaStream([
         ...canvasStream.getVideoTracks(),
-        ...audioTracks,
+        ...audioTracksForStream,
       ]);
-      console.log('[record] tracks', {
-        video: recordStream.getVideoTracks().length,
-        audio: recordStream.getAudioTracks().length,
-        audioLive: audioTracks.length,
-      });
 
-      // Record from the combined stream. Try MIME strings that explicitly
-      // pair a video codec with an audio codec first; iOS Safari otherwise
-      // tends to silently drop the audio track even when MediaRecorder
-      // claims the bare `video/mp4` type is supported.
+      // Try MIME strings that explicitly pair a video codec with an audio
+      // codec first; iOS Safari otherwise tends to silently drop the audio
+      // track even when MediaRecorder claims the bare `video/mp4` type is
+      // supported.
       const mimeTypes = [
         'video/mp4;codecs=avc1.42E01E,mp4a.40.2',
+        'video/mp4;codecs=avc1,mp4a',
         'video/webm;codecs=h264,opus',
         'video/webm;codecs=vp9,opus',
         'video/webm;codecs=vp8,opus',
@@ -2109,7 +2141,11 @@ export default function Home() {
       for (const mt of mimeTypes) {
         if (MediaRecorder.isTypeSupported(mt)) { selectedMime = mt; break; }
       }
-      console.log('[record] selected mime', selectedMime || '(default)');
+
+      // Surface diagnostics on-screen so we can see them on iPhone too.
+      const diag = `mic:${mediaAudioTracks.length}/${streamRef.current.getAudioTracks().length} ctx:${audioCtxForRecording ? 'ok' : 'no'} out:${recordStream.getAudioTracks().length} mime:${selectedMime || '(default)'}`
+      console.log('[record]', diag)
+      setRecordDebug(diag)
 
       try {
         const recorder = new MediaRecorder(recordStream, selectedMime ? { mimeType: selectedMime } : undefined);
@@ -2120,6 +2156,12 @@ export default function Home() {
           // Stop draw loop
           if (recAnimFrameRef.current) cancelAnimationFrame(recAnimFrameRef.current);
           recAnimFrameRef.current = null;
+          // Release the AudioContext so the mic isn't held open after
+          // the recording finishes.
+          if (audioCtxRef.current) {
+            try { audioCtxRef.current.close() } catch { /* ignore */ }
+            audioCtxRef.current = null;
+          }
           const chunks = recordedChunksRef.current;
           if (chunks.length === 0) return;
           const blob = new Blob(chunks, { type: chunks[0].type || 'video/mp4' });
@@ -2348,6 +2390,26 @@ export default function Home() {
               </div>
               <div className="chain-badge">WORLD CHAIN</div>
             </div>
+            {recording && recordDebug && (
+              <div style={{
+                position: 'absolute',
+                top: 76,
+                left: 12,
+                right: 12,
+                padding: '6px 10px',
+                background: 'rgba(0,0,0,0.55)',
+                border: '1px solid rgba(255,255,255,0.18)',
+                borderRadius: 8,
+                color: '#e6e6e6',
+                fontFamily: 'Space Mono, monospace',
+                fontSize: 10,
+                lineHeight: 1.35,
+                zIndex: 5,
+                wordBreak: 'break-all',
+              }}>
+                {recordDebug}
+              </div>
+            )}
 
             <div className="side-buttons">
               <div>
