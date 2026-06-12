@@ -1,24 +1,33 @@
 'use client'
 
 /**
- * WorldIdVerifyButton — per-photo verification with a dynamic action.
+ * WorldIdVerifyButton — per-photo verification with auto-resume.
  *
- * The Worldcoin nullifier is derived from (person, app_id, action), so to
- * let the same human mint many verified photos we mint a fresh action per
- * photo. The action carries a chunk of the SHA-256 capture hash so two
- * different captures (even from the same person) produce two different
- * nullifiers. Pre-registration in the Developer Portal is NOT required —
- * Worldcoin treats any 1..32-char ASCII action as valid.
- *
- * Flow:
- *   1. The browser asks `/api/rp-signature` to sign the per-photo action.
- *   2. The signed payload is handed to `IDKitRequestWidget` as
- *      `rp_context`.
+ * Verification flow:
+ *   1. Browser asks `/api/rp-signature` to sign a per-photo action.
+ *   2. The signed RP context goes to `IDKitRequestWidget` as `rp_context`.
  *   3. World App generates a v3 (legacy) proof bound to the action.
- *   4. The browser forwards the proof to `/api/verify`, which posts it to
+ *   4. Browser forwards the proof to `/api/verify`, which posts it to
  *      Worldcoin's `v4/verify/{rp_id}` endpoint with
  *      `protocol_version: '3.0'`.
- *   5. `return_to` auto-redirects Safari back to the originating tab.
+ *   5. `return_to` deep-links Safari back to the originating tab.
+ *
+ * Per-photo nullifiers: action embeds the SHA-256 hash chunk so two
+ * different captures by the same human produce different nullifiers, and
+ * the smart contract's `nullifierUsed[bytes32]` mapping doesn't lock the
+ * user out after a single mint.
+ *
+ * Auto-resume on cold restore:
+ *   When iOS Safari opens a fresh tab via `return_to` (instead of
+ *   refocusing the original tab), the old widget instance dies before it
+ *   can poll the bridge for the proof World App just dropped there. The
+ *   user lands on the pre-verification screen with a "stuck" UI.
+ *   We work around it by persisting the rp_context (signed payload) to
+ *   localStorage; when the page mounts and we detect a still-valid context
+ *   for the current photo, we re-open the widget so polling resumes and
+ *   the proof — which World App often re-sends instantly from cache — is
+ *   picked up immediately. The end-user sees a brief modal flash, then the
+ *   share screen.
  */
 
 import { useEffect, useRef, useState } from 'react'
@@ -43,6 +52,13 @@ interface Props {
 const APP_ID = (process.env.NEXT_PUBLIC_WORLD_APP_ID ||
   'app_1e1334283f3c12386ee55c5617ff5972') as `app_${string}`
 const RP_ID = process.env.NEXT_PUBLIC_WORLD_RP_ID || 'rp_5c50700e68b83094'
+const RP_CTX_STORAGE_KEY = 'zktruth_rpcontext_v1'
+
+interface PersistedRpContext {
+  ctx: RpContext
+  action: string
+  expiresAt: number
+}
 
 /**
  * Build a unique-per-photo action identifier. World App accepts arbitrary
@@ -53,6 +69,37 @@ const RP_ID = process.env.NEXT_PUBLIC_WORLD_RP_ID || 'rp_5c50700e68b83094'
 function buildAction(photoHash: string | undefined): string {
   const clean = (photoHash || 'unknown').replace(/^0x/, '')
   return `cap-${clean.slice(0, 28)}`
+}
+
+function loadPersistedRpContext(): PersistedRpContext | null {
+  if (typeof window === 'undefined') return null
+  try {
+    const raw = localStorage.getItem(RP_CTX_STORAGE_KEY)
+    if (!raw) return null
+    const data = JSON.parse(raw) as PersistedRpContext
+    // Reject if missing fields or expired (with a 30s grace window so a
+    // request that just landed isn't thrown out by clock skew).
+    if (!data?.ctx?.signature || !data?.action) return null
+    const nowSec = Math.floor(Date.now() / 1000)
+    if (typeof data.expiresAt !== 'number' || data.expiresAt < nowSec - 30) {
+      return null
+    }
+    return data
+  } catch {
+    return null
+  }
+}
+
+function persistRpContext(data: PersistedRpContext) {
+  if (typeof window === 'undefined') return
+  try {
+    localStorage.setItem(RP_CTX_STORAGE_KEY, JSON.stringify(data))
+  } catch { /* ignore */ }
+}
+
+function clearPersistedRpContext() {
+  if (typeof window === 'undefined') return
+  try { localStorage.removeItem(RP_CTX_STORAGE_KEY) } catch { /* ignore */ }
 }
 
 export function WorldIdVerifyButton({
@@ -68,9 +115,8 @@ export function WorldIdVerifyButton({
   const [rpContext, setRpContext] = useState<RpContext | null>(null)
   const [fetchingSig, setFetchingSig] = useState(false)
   const action = buildAction(signal)
-  // Track which action the current rpContext was signed for so a new
-  // capture invalidates a stale signature.
   const signedActionRef = useRef<string | null>(null)
+  const autoResumedRef = useRef(false)
 
   const fetchRpContext = async (forAction: string): Promise<RpContext | null> => {
     setFetchingSig(true)
@@ -101,6 +147,7 @@ export function WorldIdVerifyButton({
       }
       setRpContext(ctx)
       signedActionRef.current = forAction
+      persistRpContext({ ctx, action: forAction, expiresAt: data.expires_at })
       return ctx
     } catch (e) {
       onError(String(e))
@@ -110,7 +157,32 @@ export function WorldIdVerifyButton({
     }
   }
 
-  // If the widget is open and we don't yet have a matching context, fetch.
+  // On first mount, try to restore a persisted RP context. If it's for the
+  // same action as the current photo and the verification hasn't completed,
+  // we auto-open the widget so its polling can pick up the proof that
+  // World App may already have left on the bridge.
+  useEffect(() => {
+    if (autoResumedRef.current) return
+    autoResumedRef.current = true
+    if (verified) return
+    const persisted = loadPersistedRpContext()
+    if (!persisted) return
+    if (persisted.action !== action) {
+      // Different photo than the last attempt — clear stale context.
+      clearPersistedRpContext()
+      return
+    }
+    setRpContext(persisted.ctx)
+    signedActionRef.current = persisted.action
+    // Defer the auto-open by a tick so the widget can mount first.
+    onVerifying()
+    setOpen(true)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  // If the user opens the widget but we don't yet have a matching context,
+  // fetch one. (Covers the manual click path; the auto-resume path above
+  // already sets one before flipping `open`.)
   useEffect(() => {
     if (open && (!rpContext || signedActionRef.current !== action)) {
       fetchRpContext(action)
@@ -138,6 +210,9 @@ export function WorldIdVerifyButton({
       throw new Error(msg)
     }
     const { nullifier_hash } = (await res.json()) as { nullifier_hash: string }
+    // We're done with this rp_context — drop it so the next photo gets a
+    // fresh one and we don't try to auto-resume into a finished flow.
+    clearPersistedRpContext()
     onVerified(nullifier_hash as `0x${string}`)
   }
 

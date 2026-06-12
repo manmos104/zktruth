@@ -2107,10 +2107,12 @@ export default function Home() {
     setScreen("camera"); setMintComplete(false); setCapturedImage(null); setCapturedVideo(null); setProofData(null);
     setTxHash(null); setRecording(false); setWorldIdVerified(false); setWorldIdVerifying(false);
     setWorldIdNullifier(null); setMintMode("verified");
-    // Reset → drop the persisted flow snapshot so the next visit starts
-    // clean instead of restoring this finished session.
+    // Reset → drop both persisted entries (flow snapshot + signed
+    // rp_context) so the next visit starts clean instead of restoring
+    // this finished session or auto-reopening the verify widget.
     if (typeof window !== 'undefined') {
       try { localStorage.removeItem(SNAPSHOT_KEY); } catch { /* ignore */ }
+      try { localStorage.removeItem('zktruth_rpcontext_v1'); } catch { /* ignore */ }
     }
     if (recordingTimerRef.current) clearInterval(recordingTimerRef.current);
     if (recAnimFrameRef.current) cancelAnimationFrame(recAnimFrameRef.current);
