@@ -2075,22 +2075,44 @@ export default function Home() {
       };
       drawFrame();
 
-      // Capture stream from canvas
+      // Capture video stream from canvas
       const canvasStream = rc.captureStream(30);
 
-      // Add audio track from original stream if available
-      const audioTracks = streamRef.current.getAudioTracks();
-      audioTracks.forEach(t => canvasStream.addTrack(t));
+      // Build a fresh MediaStream that combines canvas video + mic audio.
+      // iOS Safari's MediaRecorder is finicky about audio tracks attached
+      // via canvasStream.addTrack(); constructing a new stream with both
+      // track sets in the constructor is the reliable path.
+      const audioTracks = streamRef.current.getAudioTracks().filter(t => t.readyState === 'live');
+      const recordStream = new MediaStream([
+        ...canvasStream.getVideoTracks(),
+        ...audioTracks,
+      ]);
+      console.log('[record] tracks', {
+        video: recordStream.getVideoTracks().length,
+        audio: recordStream.getAudioTracks().length,
+        audioLive: audioTracks.length,
+      });
 
-      // Record from canvas stream
-      const mimeTypes = ['video/mp4', 'video/webm;codecs=h264', 'video/webm'];
+      // Record from the combined stream. Try MIME strings that explicitly
+      // pair a video codec with an audio codec first; iOS Safari otherwise
+      // tends to silently drop the audio track even when MediaRecorder
+      // claims the bare `video/mp4` type is supported.
+      const mimeTypes = [
+        'video/mp4;codecs=avc1.42E01E,mp4a.40.2',
+        'video/webm;codecs=h264,opus',
+        'video/webm;codecs=vp9,opus',
+        'video/webm;codecs=vp8,opus',
+        'video/mp4',
+        'video/webm',
+      ];
       let selectedMime = '';
       for (const mt of mimeTypes) {
         if (MediaRecorder.isTypeSupported(mt)) { selectedMime = mt; break; }
       }
+      console.log('[record] selected mime', selectedMime || '(default)');
 
       try {
-        const recorder = new MediaRecorder(canvasStream, selectedMime ? { mimeType: selectedMime } : undefined);
+        const recorder = new MediaRecorder(recordStream, selectedMime ? { mimeType: selectedMime } : undefined);
         recorder.ondataavailable = (e) => {
           if (e.data.size > 0) recordedChunksRef.current.push(e.data);
         };
