@@ -2495,13 +2495,11 @@ export default function Home() {
             {capturedImage ? (
               <img src={capturedImage} alt="" className="wid-bg" />
             ) : capturedVideoUrl ? (
-              // Video captures: drop the autoplay-muted preview entirely and
-              // present a clean white card with the World mark centered.
-              // We pull the mark from /public/world-logo.svg so the user
-              // can drop in the official asset from world.org without code
-              // changes; if the file is missing we show a neutral
-              // geometric placeholder so we don't reproduce a trademarked
-              // mark in code.
+              // Video captures: drop the autoplay-muted preview entirely
+              // and present a clean white card with the zkTruth brand
+              // mark centered. The asset is the same green-check PNG we
+              // already use elsewhere (OG cards / Twitter preview), so
+              // the visual language stays consistent across the app.
               <div
                 className="wid-bg"
                 style={{
@@ -2512,28 +2510,13 @@ export default function Home() {
                 }}
               >
                 <img
-                  src="/world-logo.svg"
-                  alt="World"
-                  style={{ width: '60%', maxWidth: 320 }}
-                  onError={(e) => {
-                    // Fallback: replace the broken image with a neutral
-                    // 3-bar circular placeholder, NOT a copy of the real
-                    // World brand mark. Drop the official asset at
-                    // /public/world-logo.svg to swap this out.
-                    const img = e.currentTarget;
-                    const wrap = img.parentElement;
-                    if (!wrap) return;
-                    img.style.display = 'none';
-                    if (wrap.querySelector('[data-logo-fallback]')) return;
-                    const ph = document.createElement('div');
-                    ph.setAttribute('data-logo-fallback', '1');
-                    ph.style.cssText = 'width:60%;max-width:320px;aspect-ratio:1;border:14px solid #111;border-radius:50%;display:flex;flex-direction:column;justify-content:space-around;padding:24px;box-sizing:border-box;';
-                    for (let i = 0; i < 3; i++) {
-                      const bar = document.createElement('div');
-                      bar.style.cssText = 'height:14px;background:#111;border-radius:8px;';
-                      ph.appendChild(bar);
-                    }
-                    wrap.appendChild(ph);
+                  src="/zktruth-logo-green.png"
+                  alt="zkTruth"
+                  style={{
+                    width: '72%',
+                    maxWidth: 360,
+                    height: 'auto',
+                    objectFit: 'contain',
                   }}
                 />
               </div>
