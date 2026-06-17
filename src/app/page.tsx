@@ -2416,6 +2416,33 @@ export default function Home() {
                 </div>
                 <div className="wid-badge">CAPTURED</div>
               </div>
+              {capturedVideoUrl && (
+                // Opens the recorded blob in a new tab so iOS Safari's
+                // native video player handles playback (with audio, scrubbing,
+                // and AirPlay) — the inline `<video class="wid-bg">` is
+                // hard-muted for autoplay and can't be used to verify sound.
+                <a
+                  href={capturedVideoUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  style={{
+                    position: 'absolute',
+                    top: 76,
+                    right: 12,
+                    padding: '6px 10px',
+                    background: 'rgba(0,0,0,0.6)',
+                    border: '1px solid rgba(255,255,255,0.25)',
+                    borderRadius: 20,
+                    color: '#e6e6e6',
+                    fontFamily: 'Space Mono, monospace',
+                    fontSize: 11,
+                    textDecoration: 'none',
+                    zIndex: 6,
+                  }}
+                >
+                  ▶ PLAY WITH AUDIO
+                </a>
+              )}
               <div className="wid-bottom">
                 <div className="wid-hash">{proofData.hash.slice(0,22)}...</div>
                 <div className="wid-time">{proofData.timestamp.split('T')[1]?.split('.')[0]} UTC • World Chain</div>
