@@ -2029,31 +2029,104 @@ export default function Home() {
       }
       setRecording(false);
     } else {
-      // Start recording — record straight off the camera MediaStream.
+      // Start recording — canvas-based for proper 9:16 portrait framing,
+      // with audio routed through Web Audio API so iOS Safari actually
+      // encodes it.
       //
-      // We used to compose a canvas-based stream (so the recording could
-      // pre-bake the portrait crop, digital zoom, and front-camera mirror
-      // exactly as the preview showed them). iOS Safari's MediaRecorder
-      // silently drops the audio track whenever the video track originates
-      // from a canvas — confirmed even with the new MediaStream() + Web
-      // Audio API workarounds. Recording the raw camera stream is the only
-      // path that reliably produces a clip with sound; we accept the
-      // trade-off of losing the canvas-applied visual transforms because
-      // Proof-of-Capture cares more about the authentic camera frame.
-      if (!streamRef.current) return;
+      // The earlier audio-only "raw camera stream" path worked because the
+      // recorder saw a real <track kind=audio> coming from getUserMedia.
+      // The problem was that we also lost the portrait crop / mirror,
+      // because the iPhone sensor delivers landscape pixels. Going back
+      // to the canvas-based composite gets the orientation right.
+      //
+      // To keep the audio working alongside the canvas video we route the
+      // mic through `AudioContext.createMediaStreamDestination()` — this
+      // produces an audio track Safari's encoder picks up reliably even
+      // when the matched video track originates from `canvas.captureStream()`.
+      if (!streamRef.current || !videoRef.current) return;
       recordedChunksRef.current = [];
       setCapturedVideo(null);
 
-      // Construct a fresh MediaStream explicitly from the camera stream's
-      // tracks. Some iOS Safari builds need the recorder's input stream
-      // to be a brand-new object (not a reused camera stream) before they
-      // actually enumerate the audio track.
-      const rawVideoTracks = streamRef.current.getVideoTracks();
-      const rawAudioTracks = streamRef.current.getAudioTracks();
-      const recordStream = new MediaStream([...rawVideoTracks, ...rawAudioTracks]);
-      // Listen for any mid-recording mute/unmute on the mic so we can
-      // surface it in the on-screen diagnostics if it happens.
-      rawAudioTracks.forEach(t => {
+      const v = videoRef.current;
+      const pw = 1080, ph = 1920; // 9:16 portrait
+
+      // Create / reuse the offscreen canvas we draw into.
+      if (!recCanvasRef.current) {
+        recCanvasRef.current = document.createElement('canvas');
+      }
+      const rc = recCanvasRef.current;
+      rc.width = pw;
+      rc.height = ph;
+      const ctx = rc.getContext('2d');
+      if (!ctx) return;
+
+      // Draw loop: video → canvas in cover mode.
+      const drawFrame = () => {
+        const vw = v.videoWidth || 1080;
+        const vh = v.videoHeight || 1920;
+        const vr = vw / vh;
+        const cr = pw / ph;
+        let sx = 0, sy = 0, sw = vw, sh = vh;
+        if (vr > cr) { sw = vh * cr; sx = (vw - sw) / 2; }
+        else { sh = vw / cr; sy = (vh - sh) / 2; }
+
+        // Match the preview's displayScale so the captured clip frames
+        // exactly what the user saw.
+        const z = displayScale;
+        if (z > 1) {
+          const zw = sw / z, zh = sh / z;
+          sx += (sw - zw) / 2; sy += (sh - zh) / 2;
+          sw = zw; sh = zh;
+        }
+
+        ctx.save();
+        if (facingMode === 'user') {
+          ctx.translate(pw, 0);
+          ctx.scale(-1, 1);
+        }
+        ctx.drawImage(v, sx, sy, sw, sh, 0, 0, pw, ph);
+        ctx.restore();
+
+        recAnimFrameRef.current = requestAnimationFrame(drawFrame);
+      };
+      drawFrame();
+
+      const canvasStream = rc.captureStream(30);
+
+      // Route the mic through Web Audio API so the resulting audio track is
+      // a freshly emitted track from a MediaStreamDestination — empirically
+      // the only form iOS Safari's encoder reliably attaches when the
+      // matching video track comes from a canvas captureStream.
+      const rawAudioTracks = streamRef.current.getAudioTracks().filter(t => t.readyState === 'live');
+      let audioTracksForStream: MediaStreamTrack[] = [];
+      let audioCtxForRecording: AudioContext | null = null;
+      if (rawAudioTracks.length > 0) {
+        try {
+          const Ctor: typeof AudioContext =
+            window.AudioContext ||
+            (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
+          audioCtxForRecording = new Ctor();
+          if (audioCtxForRecording.state === 'suspended') {
+            audioCtxForRecording.resume().catch(() => {});
+          }
+          const source = audioCtxForRecording.createMediaStreamSource(streamRef.current);
+          const destination = audioCtxForRecording.createMediaStreamDestination();
+          source.connect(destination);
+          audioTracksForStream = destination.stream.getAudioTracks();
+        } catch (e) {
+          console.warn('[record] AudioContext setup failed', e);
+          audioTracksForStream = rawAudioTracks;
+        }
+      }
+      audioCtxRef.current = audioCtxForRecording;
+
+      const recordStream = new MediaStream([
+        ...canvasStream.getVideoTracks(),
+        ...audioTracksForStream,
+      ]);
+
+      // Observability for mid-recording surprises.
+      audioTracksForStream.forEach(t => {
         t.onmute = () => setRecordDebug(d => d + ' [muted!]');
         t.onunmute = () => setRecordDebug(d => d + ' [unmuted]');
         t.onended = () => setRecordDebug(d => d + ' [ended]');
@@ -2089,7 +2162,7 @@ export default function Home() {
         ? `enabled=${aTrack.enabled} muted=${aTrack.muted} state=${aTrack.readyState} label=${(aTrack.label || '').slice(0, 20)}`
         : 'no-audio-track';
       const liveAudio = audioTracks.filter(t => t.readyState === 'live').length;
-      const diag = `mic:${liveAudio}/${audioTracks.length} mime:${selectedMime || '(default)'}\nA:${audioInfo}\nMIME:${mimeSupport}`
+      const diag = `mic:${liveAudio}/${audioTracks.length} mode:canvas+ctx mime:${selectedMime || '(default)'}\nA:${audioInfo}\nMIME:${mimeSupport}`
       console.log('[record]', diag)
       setRecordDebug(diag)
 
