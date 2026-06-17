@@ -1415,6 +1415,11 @@ export default function Home() {
   // On-screen recorder diagnostics for debugging audio capture on devices
   // where we don't have access to a JS console (e.g., iPhone Safari).
   const [recordDebug, setRecordDebug] = useState<string>("");
+  // Replay overlay state — opens the recorded clip with audio in an
+  // in-app modal so the user can dismiss back to the worldid screen
+  // (the previous "open in new tab" path made iOS Safari swallow the
+  // tab and there was no obvious way back to the verify flow).
+  const [replayOpen, setReplayOpen] = useState(false);
 
   // Snapshot key for localStorage. World App's auto-redirect after
   // verification re-loads the page in a fresh tab, dropping React state.
@@ -2492,9 +2497,11 @@ export default function Home() {
             ) : capturedVideoUrl ? (
               // Video captures: drop the autoplay-muted preview entirely and
               // present a clean white card with the World mark centered.
-              // The user gets a full-fidelity "Replay" path via the button
-              // stack at the bottom, so the looped silent preview is just
-              // visual noise here.
+              // We pull the mark from /public/world-logo.svg so the user
+              // can drop in the official asset from world.org without code
+              // changes; if the file is missing we show a neutral
+              // geometric placeholder so we don't reproduce a trademarked
+              // mark in code.
               <div
                 className="wid-bg"
                 style={{
@@ -2504,19 +2511,31 @@ export default function Home() {
                   justifyContent: 'center',
                 }}
               >
-                <svg
-                  viewBox="0 0 200 200"
-                  fill="none"
-                  stroke="#111"
-                  strokeWidth="14"
-                  strokeLinecap="round"
-                  style={{ width: '60%', maxWidth: 320, opacity: 0.92 }}
-                >
-                  <circle cx="100" cy="100" r="88" />
-                  <line x1="22" y1="72" x2="178" y2="72" />
-                  <line x1="22" y1="100" x2="178" y2="100" />
-                  <line x1="22" y1="128" x2="178" y2="128" />
-                </svg>
+                <img
+                  src="/world-logo.svg"
+                  alt="World"
+                  style={{ width: '60%', maxWidth: 320 }}
+                  onError={(e) => {
+                    // Fallback: replace the broken image with a neutral
+                    // 3-bar circular placeholder, NOT a copy of the real
+                    // World brand mark. Drop the official asset at
+                    // /public/world-logo.svg to swap this out.
+                    const img = e.currentTarget;
+                    const wrap = img.parentElement;
+                    if (!wrap) return;
+                    img.style.display = 'none';
+                    if (wrap.querySelector('[data-logo-fallback]')) return;
+                    const ph = document.createElement('div');
+                    ph.setAttribute('data-logo-fallback', '1');
+                    ph.style.cssText = 'width:60%;max-width:320px;aspect-ratio:1;border:14px solid #111;border-radius:50%;display:flex;flex-direction:column;justify-content:space-around;padding:24px;box-sizing:border-box;';
+                    for (let i = 0; i < 3; i++) {
+                      const bar = document.createElement('div');
+                      bar.style.cssText = 'height:14px;background:#111;border-radius:8px;';
+                      ph.appendChild(bar);
+                    }
+                    wrap.appendChild(ph);
+                  }}
+                />
               </div>
             ) : (
               <div className="wid-bg" style={{background:'#111'}} />
@@ -2545,28 +2564,27 @@ export default function Home() {
                 <div className="wid-hash" style={capturedVideoUrl ? { color: '#444' } : undefined}>{proofData.hash.slice(0,22)}...</div>
                 <div className="wid-time" style={capturedVideoUrl ? { color: '#777' } : undefined}>{proofData.timestamp.split('T')[1]?.split('.')[0]} UTC • World Chain</div>
                 {capturedVideoUrl && (
-                  // Replay sits directly above VERIFY at matching size,
-                  // styled to read on the white card. Tapping opens the
-                  // recorded blob in iOS Safari's native player.
-                  <a
-                    href={capturedVideoUrl}
-                    target="_blank"
-                    rel="noopener noreferrer"
+                  // Replay sits directly above VERIFY at matching size.
+                  // Tapping opens an in-app modal with a <video controls>
+                  // element (unmuted, full controls) so the user can play
+                  // with audio and dismiss back to the verify flow with
+                  // the close button. Earlier we opened the blob in a new
+                  // tab — that worked for audio but left the user without
+                  // an obvious "back to zkTruth" affordance.
+                  <button
+                    type="button"
                     className="wid-verify-btn"
+                    onClick={() => setReplayOpen(true)}
                     style={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
                       background: '#fff',
                       border: '1.5px solid #111',
                       color: '#111',
                       boxShadow: 'none',
-                      textDecoration: 'none',
                       marginBottom: 10,
                     }}
                   >
                     ▶ REPLAY
-                  </a>
+                  </button>
                 )}
                 <WorldIdVerifyButton
                   signal={proofData?.hash ?? ''}
@@ -2609,6 +2627,61 @@ export default function Home() {
                 <div className="wid-verified-icon"><svg viewBox="0 0 24 24" fill="none" stroke="#00ff87" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="m5 12 5 5L20 7"/></svg></div>
                 <div className="wid-verified-title">Proof Accepted</div>
                 <div className="wid-verified-sub">Zero-knowledge proof validated · Initiating on-chain mint</div>
+              </div>
+            )}
+            {replayOpen && capturedVideoUrl && (
+              // Fullscreen in-app replay. The <video> here is mounted
+              // unmuted with native controls so iOS Safari hands off to
+              // its built-in player gestures (scrub, AirPlay, etc.). The
+              // close button returns the user to the verify flow without
+              // leaving the page.
+              <div
+                style={{
+                  position: 'absolute',
+                  inset: 0,
+                  background: '#000',
+                  zIndex: 50,
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                }}
+                onClick={() => setReplayOpen(false)}
+              >
+                <video
+                  src={capturedVideoUrl}
+                  controls
+                  autoPlay
+                  playsInline
+                  style={{
+                    maxWidth: '100%',
+                    maxHeight: '100%',
+                    background: '#000',
+                  }}
+                  onClick={(e) => e.stopPropagation()}
+                />
+                <button
+                  type="button"
+                  onClick={(e) => { e.stopPropagation(); setReplayOpen(false); }}
+                  aria-label="Close replay"
+                  style={{
+                    position: 'absolute',
+                    top: 14,
+                    right: 14,
+                    width: 44,
+                    height: 44,
+                    borderRadius: 22,
+                    background: 'rgba(255,255,255,0.95)',
+                    color: '#111',
+                    border: 'none',
+                    fontFamily: 'Space Mono, monospace',
+                    fontSize: 18,
+                    fontWeight: 700,
+                    cursor: 'pointer',
+                    boxShadow: '0 4px 18px rgba(0,0,0,0.4)',
+                  }}
+                >
+                  ✕
+                </button>
               </div>
             )}
           </div>
