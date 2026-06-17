@@ -2044,7 +2044,20 @@ export default function Home() {
       recordedChunksRef.current = [];
       setCapturedVideo(null);
 
-      const recordStream = streamRef.current;
+      // Construct a fresh MediaStream explicitly from the camera stream's
+      // tracks. Some iOS Safari builds need the recorder's input stream
+      // to be a brand-new object (not a reused camera stream) before they
+      // actually enumerate the audio track.
+      const rawVideoTracks = streamRef.current.getVideoTracks();
+      const rawAudioTracks = streamRef.current.getAudioTracks();
+      const recordStream = new MediaStream([...rawVideoTracks, ...rawAudioTracks]);
+      // Listen for any mid-recording mute/unmute on the mic so we can
+      // surface it in the on-screen diagnostics if it happens.
+      rawAudioTracks.forEach(t => {
+        t.onmute = () => setRecordDebug(d => d + ' [muted!]');
+        t.onunmute = () => setRecordDebug(d => d + ' [unmuted]');
+        t.onended = () => setRecordDebug(d => d + ' [ended]');
+      });
 
       // From the on-screen MIME probe on a recent iOS Safari we now know:
       //   v/mp4=Y, v/mp4;codecs=avc1.42E01E,mp4a.40.2=Y, v/mp4;codecs=avc1,mp4a=Y,
@@ -2081,7 +2094,14 @@ export default function Home() {
       setRecordDebug(diag)
 
       try {
-        const recorder = new MediaRecorder(recordStream, selectedMime ? { mimeType: selectedMime } : undefined);
+        // Explicit bitrate hints. iOS Safari has been observed to drop
+        // the audio track silently when the encoder isn't told to budget
+        // for it; setting `audioBitsPerSecond` forces the encoder to
+        // allocate space for the mic stream.
+        const recorderOpts: MediaRecorderOptions = selectedMime
+          ? { mimeType: selectedMime, audioBitsPerSecond: 128000, videoBitsPerSecond: 2_500_000 }
+          : { audioBitsPerSecond: 128000, videoBitsPerSecond: 2_500_000 }
+        const recorder = new MediaRecorder(recordStream, recorderOpts);
         recorder.ondataavailable = (e) => {
           if (e.data.size > 0) recordedChunksRef.current.push(e.data);
         };
@@ -2097,13 +2117,21 @@ export default function Home() {
           const chunks = recordedChunksRef.current;
           if (chunks.length === 0) return;
           const blob = new Blob(chunks, { type: chunks[0].type || 'video/mp4' });
+          // Record what we actually produced so the diagnostic chip on
+          // the next view (or the next recording attempt) shows it.
+          console.log('[record] blob', { type: blob.type, size: blob.size, chunks: chunks.length });
+          setRecordDebug(`Last blob: type=${blob.type} size=${blob.size} chunks=${chunks.length}`);
           setCapturedVideo(blob);
           const proof = { timestamp: getTimestamp(), hash: generateHash(), gps: gpsCoords, device: "Device", chain: "World Chain", tokenId: Math.floor(Math.random() * 999999) + 1, type: "video" };
           setCapturedImage(null); setProofData(proof); setMintStep(0); setMintComplete(false);
           setWorldIdVerified(false); setWorldIdVerifying(false); setScreen("worldid");
         };
         mediaRecorderRef.current = recorder;
-        recorder.start(1000);
+        // Don't pass a timeslice — iOS Safari has been observed to emit
+        // chunks without the audio interleave when the encoder is asked
+        // to flush every N ms. Letting it produce one chunk at stop is
+        // the safest.
+        recorder.start();
       } catch (e) {
         console.error('MediaRecorder error:', e);
         if (recAnimFrameRef.current) cancelAnimationFrame(recAnimFrameRef.current);
@@ -2322,7 +2350,7 @@ export default function Home() {
               </div>
               <div className="chain-badge">WORLD CHAIN</div>
             </div>
-            {recording && recordDebug && (
+            {recordDebug && (
               <div style={{
                 position: 'absolute',
                 top: 76,
