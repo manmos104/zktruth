@@ -1626,15 +1626,15 @@ export default function Home() {
         video = { facingMode: facing || facingMode, width: { ideal: 1080 }, height: { ideal: 1920 } };
       }
       // Request the microphone alongside the camera so MediaRecorder can
-      // pick up the audio track when the user records a video. We mute the
-      // <video> element below so the live preview doesn't echo, but the
-      // audio track stays on the stream for recording.
+      // pick up the audio track when the user records a video. Use a
+      // bare `audio: true` rather than a constraints object — iOS Safari
+      // appears to honour the simpler form more reliably in our tests
+      // (a constraints object with echoCancellation/noiseSuppression
+      // succeeded but the resulting audio track was silently dropped by
+      // the mp4 encoder).
       const constraints: MediaStreamConstraints = {
         video,
-        audio: {
-          echoCancellation: true,
-          noiseSuppression: true,
-        },
+        audio: true,
       };
       const stream = await navigator.mediaDevices.getUserMedia(constraints);
       streamRef.current = stream;
@@ -2046,20 +2046,22 @@ export default function Home() {
 
       const recordStream = streamRef.current;
 
-      // Probe what iOS Safari actually accepts. We don't trust
-      // isTypeSupported() to imply audio inclusion, so we display every
-      // result on screen and try bare `video/mp4` first this time — some
-      // builds of Safari include audio with the default codec selection
-      // but drop it when an explicit `mp4a.*` profile is requested.
+      // From the on-screen MIME probe on a recent iOS Safari we now know:
+      //   v/mp4=Y, v/mp4;codecs=avc1.42E01E,mp4a.40.2=Y, v/mp4;codecs=avc1,mp4a=Y,
+      //   v/webm=Y, v/webm;codecs=vp9,opus=Y
+      // and that all of the MP4 variants silently drop the audio track,
+      // even though the encoder reports support. Modern iOS Safari has
+      // shipped vp9+opus webm support, which DOES carry the audio track
+      // through to the saved blob, so we put webm at the top of the
+      // priority list. We keep the MP4 variants as a fallback for
+      // browsers (e.g. older iOS or Android) that don't take webm.
       const mimeTypes = [
-        'video/mp4',
-        'video/mp4;codecs=avc1.42E01E,mp4a.40.2',
-        'video/mp4;codecs=h264,aac',
-        'video/mp4;codecs=avc1,mp4a',
-        'audio/mp4',
-        'video/webm',
         'video/webm;codecs=vp9,opus',
-        'video/webm;codecs=h264,opus',
+        'video/webm;codecs=vp8,opus',
+        'video/webm',
+        'video/mp4;codecs=avc1.42E01E,mp4a.40.2',
+        'video/mp4;codecs=avc1,mp4a',
+        'video/mp4',
       ];
       const mimeSupport = mimeTypes.map(mt => `${mt.replace('video/', 'v/').replace('audio/', 'a/')}=${MediaRecorder.isTypeSupported(mt) ? 'Y' : 'N'}`).join(' ')
       let selectedMime = '';

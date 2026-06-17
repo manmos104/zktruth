@@ -22,11 +22,17 @@ export const metadata: Metadata = {
     title: 'zkTruth',
   },
   manifest: '/manifest.json',
+  other: {
+    // Stops Safari / Chrome from auto-translating the camera UI labels
+    // (e.g. "VERIFY :: WORLD ID", "WALLET", "REC 00:07") which mangles
+    // the inline copy and the debug overlay we use to chase Safari bugs.
+    google: 'notranslate',
+  },
 }
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en" style={{ height: '100%', overflow: 'hidden' }}>
+    <html lang="en" translate="no" className="notranslate" style={{ height: '100%', overflow: 'hidden' }}>
       <body className={geist.className} style={{ height: '100%', overflow: 'hidden', margin: 0 }}>
         <Providers>{children}</Providers>
       </body>
