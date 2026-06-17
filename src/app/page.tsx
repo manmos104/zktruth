@@ -750,6 +750,15 @@ canvas { display: none; }
   transition: all 0.2s;
 }
 .wid-verify-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+/* Variant used when the surrounding card is the clean white background
+   (video captures). Solid black button with white text reads cleanly
+   against the white card and pairs visually with the outlined Replay
+   button placed directly above it. */
+.wid-verify-btn--light {
+  background: #111 !important;
+  color: #fff !important;
+  box-shadow: 0 4px 18px rgba(0,0,0,0.18) !important;
+}
 .wid-gas-btn {
   width: 100%;
   height: 44px;
@@ -2478,47 +2487,87 @@ export default function Home() {
 
         {screen === "worldid" && proofData && (
           <div className="wid-screen">
-            {capturedImage ? <img src={capturedImage} alt="" className="wid-bg" /> : capturedVideoUrl ? <video src={capturedVideoUrl} className="wid-bg" autoPlay loop muted playsInline /> : <div className="wid-bg" style={{background:'#111'}} />}
+            {capturedImage ? (
+              <img src={capturedImage} alt="" className="wid-bg" />
+            ) : capturedVideoUrl ? (
+              // Video captures: drop the autoplay-muted preview entirely and
+              // present a clean white card with the World mark centered.
+              // The user gets a full-fidelity "Replay" path via the button
+              // stack at the bottom, so the looped silent preview is just
+              // visual noise here.
+              <div
+                className="wid-bg"
+                style={{
+                  background: '#fff',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                }}
+              >
+                <svg
+                  viewBox="0 0 200 200"
+                  fill="none"
+                  stroke="#111"
+                  strokeWidth="14"
+                  strokeLinecap="round"
+                  style={{ width: '60%', maxWidth: 320, opacity: 0.92 }}
+                >
+                  <circle cx="100" cy="100" r="88" />
+                  <line x1="22" y1="72" x2="178" y2="72" />
+                  <line x1="22" y1="100" x2="178" y2="100" />
+                  <line x1="22" y1="128" x2="178" y2="128" />
+                </svg>
+              </div>
+            ) : (
+              <div className="wid-bg" style={{background:'#111'}} />
+            )}
             <div className="wid-overlay">
               <div className="wid-top">
                 <div style={{display:'flex',alignItems:'center',gap:10}}>
-                  <button className="wid-back" onClick={handleReset}>✕</button>
-                  <svg className="logo-icon" viewBox="0 0 24 24" fill="none" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v10z" stroke="white"/><path d="m8 9.5 2.5 2.5 5-5" stroke="#00c864"/></svg>
-                  <div className="logo-text"><span className="logo-zk">zk</span><span className="logo-truth">Truth</span></div>
+                  <button
+                    className="wid-back"
+                    onClick={handleReset}
+                    style={capturedVideoUrl ? { background: 'rgba(0,0,0,0.08)', color: '#111' } : undefined}
+                  >✕</button>
+                  <svg className="logo-icon" viewBox="0 0 24 24" fill="none" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v10z" stroke={capturedVideoUrl ? '#111' : 'white'} />
+                    <path d="m8 9.5 2.5 2.5 5-5" stroke="#00c864" />
+                  </svg>
+                  <div className="logo-text" style={capturedVideoUrl ? { color: '#111' } : undefined}>
+                    <span className="logo-zk" style={capturedVideoUrl ? { color: '#111' } : undefined}>zk</span>
+                    <span className="logo-truth" style={capturedVideoUrl ? { color: '#111' } : undefined}>Truth</span>
+                  </div>
                   <div className="live-badge"><div className="live-dot" />LIVE</div>
                 </div>
-                <div className="wid-badge">CAPTURED</div>
+                <div className="wid-badge" style={capturedVideoUrl ? { background: '#111', color: '#fff', border: 'none' } : undefined}>CAPTURED</div>
               </div>
-              {capturedVideoUrl && (
-                // Opens the recorded blob in a new tab so iOS Safari's
-                // native video player handles playback (with audio, scrubbing,
-                // and AirPlay) — the inline `<video class="wid-bg">` is
-                // hard-muted for autoplay and can't be used to verify sound.
-                <a
-                  href={capturedVideoUrl}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  style={{
-                    position: 'absolute',
-                    top: 76,
-                    right: 12,
-                    padding: '6px 10px',
-                    background: 'rgba(0,0,0,0.6)',
-                    border: '1px solid rgba(255,255,255,0.25)',
-                    borderRadius: 20,
-                    color: '#e6e6e6',
-                    fontFamily: 'Space Mono, monospace',
-                    fontSize: 11,
-                    textDecoration: 'none',
-                    zIndex: 6,
-                  }}
-                >
-                  ▶ PLAY WITH AUDIO
-                </a>
-              )}
               <div className="wid-bottom">
-                <div className="wid-hash">{proofData.hash.slice(0,22)}...</div>
-                <div className="wid-time">{proofData.timestamp.split('T')[1]?.split('.')[0]} UTC • World Chain</div>
+                <div className="wid-hash" style={capturedVideoUrl ? { color: '#444' } : undefined}>{proofData.hash.slice(0,22)}...</div>
+                <div className="wid-time" style={capturedVideoUrl ? { color: '#777' } : undefined}>{proofData.timestamp.split('T')[1]?.split('.')[0]} UTC • World Chain</div>
+                {capturedVideoUrl && (
+                  // Replay sits directly above VERIFY at matching size,
+                  // styled to read on the white card. Tapping opens the
+                  // recorded blob in iOS Safari's native player.
+                  <a
+                    href={capturedVideoUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="wid-verify-btn"
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      background: '#fff',
+                      border: '1.5px solid #111',
+                      color: '#111',
+                      boxShadow: 'none',
+                      textDecoration: 'none',
+                      marginBottom: 10,
+                    }}
+                  >
+                    ▶ REPLAY
+                  </a>
+                )}
                 <WorldIdVerifyButton
                   signal={proofData?.hash ?? ''}
                   verifying={worldIdVerifying}
@@ -2526,12 +2575,13 @@ export default function Home() {
                   onVerifying={handleWorldIdVerifying}
                   onVerified={handleWorldIdVerified}
                   onError={handleWorldIdError}
+                  className={capturedVideoUrl ? 'wid-verify-btn wid-verify-btn--light' : undefined}
                 />
                 {worldIdError && (
                   <div style={{
                     marginTop: 8,
                     padding: '8px 12px',
-                    background: 'rgba(255,59,92,0.12)',
+                    background: capturedVideoUrl ? 'rgba(255,59,92,0.08)' : 'rgba(255,59,92,0.12)',
                     border: '1px solid rgba(255,59,92,0.4)',
                     borderRadius: 6,
                     color: '#ff3b5c',
@@ -2544,7 +2594,12 @@ export default function Home() {
                     <div>{worldIdError}</div>
                   </div>
                 )}
-                <button className="wid-gas-btn" onClick={handleUnverifiedMint} disabled={worldIdVerifying || worldIdVerified}>
+                <button
+                  className="wid-gas-btn"
+                  onClick={handleUnverifiedMint}
+                  disabled={worldIdVerifying || worldIdVerified}
+                  style={capturedVideoUrl ? { background: 'rgba(0,0,0,0.04)', borderColor: 'rgba(0,0,0,0.12)', color: 'rgba(0,0,0,0.55)' } : undefined}
+                >
                   MINT :: PAY GAS <span className="wld-gas-tag">{WLD_GAS_FEE}</span>
                 </button>
               </div>
