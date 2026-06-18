@@ -2584,27 +2584,46 @@ export default function Home() {
             )}
             <div className="wid-overlay">
               <div className="wid-top">
-                <div style={{display:'flex',alignItems:'center',gap:10}}>
+                {(capturedImage || capturedVideoUrl) ? (
+                  // White-card variant: ditch the zkTruth logo / LIVE
+                  // pill / CAPTURED chip so the centered brand icon and
+                  // the button stack read as the whole composition.
+                  // Only the close button stays so the user can still
+                  // back out of the verify screen.
                   <button
                     className="wid-back"
                     onClick={handleReset}
-                    style={(capturedImage || capturedVideoUrl) ? { background: 'rgba(0,0,0,0.08)', color: '#111' } : undefined}
+                    style={{ background: 'rgba(0,0,0,0.08)', color: '#111' }}
                   >✕</button>
-                  <svg className="logo-icon" viewBox="0 0 24 24" fill="none" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v10z" stroke={(capturedImage || capturedVideoUrl) ? '#111' : 'white'} />
-                    <path d="m8 9.5 2.5 2.5 5-5" stroke="#00c864" />
-                  </svg>
-                  <div className="logo-text" style={(capturedImage || capturedVideoUrl) ? { color: '#111' } : undefined}>
-                    <span className="logo-zk" style={(capturedImage || capturedVideoUrl) ? { color: '#111' } : undefined}>zk</span>
-                    <span className="logo-truth" style={(capturedImage || capturedVideoUrl) ? { color: '#111' } : undefined}>Truth</span>
-                  </div>
-                  <div className="live-badge"><div className="live-dot" />LIVE</div>
-                </div>
-                <div className="wid-badge" style={(capturedImage || capturedVideoUrl) ? { background: '#111', color: '#fff', border: 'none' } : undefined}>CAPTURED</div>
+                ) : (
+                  <>
+                    <div style={{display:'flex',alignItems:'center',gap:10}}>
+                      <button className="wid-back" onClick={handleReset}>✕</button>
+                      <svg className="logo-icon" viewBox="0 0 24 24" fill="none" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v10z" stroke="white" />
+                        <path d="m8 9.5 2.5 2.5 5-5" stroke="#00c864" />
+                      </svg>
+                      <div className="logo-text">
+                        <span className="logo-zk">zk</span>
+                        <span className="logo-truth">Truth</span>
+                      </div>
+                      <div className="live-badge"><div className="live-dot" />LIVE</div>
+                    </div>
+                    <div className="wid-badge">CAPTURED</div>
+                  </>
+                )}
               </div>
               <div className="wid-bottom">
-                <div className="wid-hash" style={(capturedImage || capturedVideoUrl) ? { color: '#444' } : undefined}>{proofData.hash.slice(0,22)}...</div>
-                <div className="wid-time" style={(capturedImage || capturedVideoUrl) ? { color: '#777' } : undefined}>{proofData.timestamp.split('T')[1]?.split('.')[0]} UTC • World Chain</div>
+                {!(capturedImage || capturedVideoUrl) && (
+                  // The hash + timestamp belong on the cinematic
+                  // photo/video preview backgrounds — they overlap the
+                  // centered icon awkwardly on the white card, so we
+                  // omit them in that variant.
+                  <>
+                    <div className="wid-hash">{proofData.hash.slice(0,22)}...</div>
+                    <div className="wid-time">{proofData.timestamp.split('T')[1]?.split('.')[0]} UTC • World Chain</div>
+                  </>
+                )}
                 {(capturedImage || capturedVideoUrl) && (
                   // Preview button sits directly above VERIFY at matching
                   // size. Tap opens an in-app modal that shows the
