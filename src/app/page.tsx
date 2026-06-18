@@ -759,6 +759,34 @@ canvas { display: none; }
   color: #fff !important;
   box-shadow: 0 4px 18px rgba(0,0,0,0.18) !important;
 }
+/* zkTruth brand mark with animated check.
+   The bubble is a static layer underneath; the check sits in an
+   absolutely-positioned overlay so it can spin around its own center
+   without dragging the bubble with it. The animation spends most of
+   its cycle holding the check in its correct upright position, then
+   does one quick full revolution and lands again — that's what reads
+   as "rotate and stop, then repeat". */
+.zk-icon-wrap {
+  position: relative;
+  width: 72%;
+  max-width: 360px;
+  aspect-ratio: 1;
+}
+.zk-icon-bubble,
+.zk-icon-check {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+.zk-icon-check {
+  transform-origin: 50% 50%;
+  animation: zk-check-spin 3s ease-in-out infinite;
+}
+@keyframes zk-check-spin {
+  0%, 35% { transform: rotate(0deg); }     /* land + hold at correct position */
+  100%    { transform: rotate(360deg); }   /* spin one full revolution */
+}
 .wid-gas-btn {
   width: 100%;
   height: 44px;
@@ -2497,9 +2525,11 @@ export default function Home() {
             ) : capturedVideoUrl ? (
               // Video captures: drop the autoplay-muted preview entirely
               // and present a clean white card with the zkTruth brand
-              // mark centered. The asset is the same green-check PNG we
-              // already use elsewhere (OG cards / Twitter preview), so
-              // the visual language stays consistent across the app.
+              // icon (speech-bubble + check) centered. We render the
+              // bubble and the check as separate SVG layers so the check
+              // can rotate independently — the bubble stays still, the
+              // check spins one full revolution and "lands" at its
+              // upright position before the next rotation begins.
               <div
                 className="wid-bg"
                 style={{
@@ -2509,16 +2539,45 @@ export default function Home() {
                   justifyContent: 'center',
                 }}
               >
-                <img
-                  src="/zktruth-logo-green.png"
-                  alt="zkTruth"
-                  style={{
-                    width: '72%',
-                    maxWidth: 360,
-                    height: 'auto',
-                    objectFit: 'contain',
-                  }}
-                />
+                <div className="zk-icon-wrap">
+                  <svg
+                    className="zk-icon-bubble"
+                    viewBox="0 0 200 200"
+                    fill="none"
+                    stroke="#111"
+                    strokeWidth="14"
+                    strokeLinejoin="round"
+                  >
+                    {/* Rounded-square speech bubble with a small tail
+                        on the bottom-left, matching the iconography in
+                        the user-supplied brand mark. */}
+                    <path d="
+                      M 50 28
+                      L 158 28
+                      Q 184 28 184 54
+                      L 184 130
+                      Q 184 156 158 156
+                      L 96 156
+                      L 68 184
+                      L 74 156
+                      L 50 156
+                      Q 24 156 24 130
+                      L 24 54
+                      Q 24 28 50 28 Z
+                    " />
+                  </svg>
+                  <svg
+                    className="zk-icon-check"
+                    viewBox="0 0 200 200"
+                    fill="none"
+                    stroke="#00c864"
+                    strokeWidth="20"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  >
+                    <path d="M 64 96 L 92 124 L 144 64" />
+                  </svg>
+                </div>
               </div>
             ) : (
               <div className="wid-bg" style={{background:'#111'}} />
@@ -2578,6 +2637,28 @@ export default function Home() {
                   onError={handleWorldIdError}
                   className={capturedVideoUrl ? 'wid-verify-btn wid-verify-btn--light' : undefined}
                 />
+                {/* Verified-path mint shortcut. Only fires once the user
+                    has finished World ID verification — otherwise it's
+                    a visible-but-disabled affordance signalling the
+                    next step in the flow. */}
+                <button
+                  type="button"
+                  className="wid-verify-btn"
+                  disabled={!worldIdVerified}
+                  onClick={() => { setMintMode('verified'); setScreen('confirm-tx'); }}
+                  style={{
+                    marginTop: 10,
+                    background: worldIdVerified
+                      ? 'linear-gradient(135deg, #00ff87, #00cc66)'
+                      : '#e8e8e8',
+                    color: worldIdVerified ? '#0a0a0a' : '#777',
+                    boxShadow: worldIdVerified
+                      ? '0 4px 18px rgba(0,200,100,0.32)'
+                      : 'none',
+                  }}
+                >
+                  NFT MINT
+                </button>
                 {worldIdError && (
                   <div style={{
                     marginTop: 8,
