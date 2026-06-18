@@ -781,11 +781,15 @@ canvas { display: none; }
 }
 .zk-icon-check {
   transform-origin: 50% 50%;
-  animation: zk-check-spin 3s ease-in-out infinite;
+  /* Fast 3-revolution spin that overshoots its landing by a touch and
+     springs back, giving the mark a snappy "lands and seals" beat. */
+  animation: zk-check-spin 1.8s cubic-bezier(.45,.02,.4,1) infinite;
 }
 @keyframes zk-check-spin {
-  0%, 35% { transform: rotate(0deg); }     /* land + hold at correct position */
-  100%    { transform: rotate(360deg); }   /* spin one full revolution */
+  0%   { transform: rotate(0deg); }        /* start at correct position */
+  55%  { transform: rotate(1110deg); }     /* 3 full spins + slight overshoot */
+  72%  { transform: rotate(1065deg); }     /* spring back past target */
+  82%, 100% { transform: rotate(1080deg); } /* settle exactly on target + hold */
 }
 .wid-gas-btn {
   width: 100%;
@@ -2520,16 +2524,12 @@ export default function Home() {
 
         {screen === "worldid" && proofData && (
           <div className="wid-screen">
-            {capturedImage ? (
-              <img src={capturedImage} alt="" className="wid-bg" />
-            ) : capturedVideoUrl ? (
-              // Video captures: drop the autoplay-muted preview entirely
-              // and present a clean white card with the zkTruth brand
-              // icon (speech-bubble + check) centered. We render the
-              // bubble and the check as separate SVG layers so the check
-              // can rotate independently — the bubble stays still, the
-              // check spins one full revolution and "lands" at its
-              // upright position before the next rotation begins.
+            {(capturedImage || capturedVideoUrl) ? (
+              // Both photo and video captures present the same clean white
+              // card with the zkTruth brand icon (speech-bubble + check)
+              // centered. The bubble and check are separate SVG layers so
+              // the check can rotate independently, locking visually as it
+              // "stamps" onto its correct position each cycle.
               <div
                 className="wid-bg"
                 style={{
@@ -2588,31 +2588,30 @@ export default function Home() {
                   <button
                     className="wid-back"
                     onClick={handleReset}
-                    style={capturedVideoUrl ? { background: 'rgba(0,0,0,0.08)', color: '#111' } : undefined}
+                    style={(capturedImage || capturedVideoUrl) ? { background: 'rgba(0,0,0,0.08)', color: '#111' } : undefined}
                   >✕</button>
                   <svg className="logo-icon" viewBox="0 0 24 24" fill="none" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v10z" stroke={capturedVideoUrl ? '#111' : 'white'} />
+                    <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v10z" stroke={(capturedImage || capturedVideoUrl) ? '#111' : 'white'} />
                     <path d="m8 9.5 2.5 2.5 5-5" stroke="#00c864" />
                   </svg>
-                  <div className="logo-text" style={capturedVideoUrl ? { color: '#111' } : undefined}>
-                    <span className="logo-zk" style={capturedVideoUrl ? { color: '#111' } : undefined}>zk</span>
-                    <span className="logo-truth" style={capturedVideoUrl ? { color: '#111' } : undefined}>Truth</span>
+                  <div className="logo-text" style={(capturedImage || capturedVideoUrl) ? { color: '#111' } : undefined}>
+                    <span className="logo-zk" style={(capturedImage || capturedVideoUrl) ? { color: '#111' } : undefined}>zk</span>
+                    <span className="logo-truth" style={(capturedImage || capturedVideoUrl) ? { color: '#111' } : undefined}>Truth</span>
                   </div>
                   <div className="live-badge"><div className="live-dot" />LIVE</div>
                 </div>
-                <div className="wid-badge" style={capturedVideoUrl ? { background: '#111', color: '#fff', border: 'none' } : undefined}>CAPTURED</div>
+                <div className="wid-badge" style={(capturedImage || capturedVideoUrl) ? { background: '#111', color: '#fff', border: 'none' } : undefined}>CAPTURED</div>
               </div>
               <div className="wid-bottom">
-                <div className="wid-hash" style={capturedVideoUrl ? { color: '#444' } : undefined}>{proofData.hash.slice(0,22)}...</div>
-                <div className="wid-time" style={capturedVideoUrl ? { color: '#777' } : undefined}>{proofData.timestamp.split('T')[1]?.split('.')[0]} UTC • World Chain</div>
-                {capturedVideoUrl && (
-                  // Replay sits directly above VERIFY at matching size.
-                  // Tapping opens an in-app modal with a <video controls>
-                  // element (unmuted, full controls) so the user can play
-                  // with audio and dismiss back to the verify flow with
-                  // the close button. Earlier we opened the blob in a new
-                  // tab — that worked for audio but left the user without
-                  // an obvious "back to zkTruth" affordance.
+                <div className="wid-hash" style={(capturedImage || capturedVideoUrl) ? { color: '#444' } : undefined}>{proofData.hash.slice(0,22)}...</div>
+                <div className="wid-time" style={(capturedImage || capturedVideoUrl) ? { color: '#777' } : undefined}>{proofData.timestamp.split('T')[1]?.split('.')[0]} UTC • World Chain</div>
+                {(capturedImage || capturedVideoUrl) && (
+                  // Preview button sits directly above VERIFY at matching
+                  // size. Tap opens an in-app modal that shows the
+                  // captured video (with audio + controls) or the photo
+                  // full-screen, and closes with the × / backdrop tap.
+                  // Label flips between REPLAY (video) and VIEW (photo)
+                  // so the affordance still reads correctly for stills.
                   <button
                     type="button"
                     className="wid-verify-btn"
@@ -2625,7 +2624,7 @@ export default function Home() {
                       marginBottom: 10,
                     }}
                   >
-                    ▶ REPLAY
+                    {capturedVideoUrl ? '▶ REPLAY' : '🖼 VIEW'}
                   </button>
                 )}
                 <WorldIdVerifyButton
@@ -2635,7 +2634,7 @@ export default function Home() {
                   onVerifying={handleWorldIdVerifying}
                   onVerified={handleWorldIdVerified}
                   onError={handleWorldIdError}
-                  className={capturedVideoUrl ? 'wid-verify-btn wid-verify-btn--light' : undefined}
+                  className={(capturedImage || capturedVideoUrl) ? 'wid-verify-btn wid-verify-btn--light' : undefined}
                 />
                 {/* Verified-path mint shortcut. Only fires once the user
                     has finished World ID verification — otherwise it's
@@ -2663,7 +2662,7 @@ export default function Home() {
                   <div style={{
                     marginTop: 8,
                     padding: '8px 12px',
-                    background: capturedVideoUrl ? 'rgba(255,59,92,0.08)' : 'rgba(255,59,92,0.12)',
+                    background: (capturedImage || capturedVideoUrl) ? 'rgba(255,59,92,0.08)' : 'rgba(255,59,92,0.12)',
                     border: '1px solid rgba(255,59,92,0.4)',
                     borderRadius: 6,
                     color: '#ff3b5c',
@@ -2680,7 +2679,7 @@ export default function Home() {
                   className="wid-gas-btn"
                   onClick={handleUnverifiedMint}
                   disabled={worldIdVerifying || worldIdVerified}
-                  style={capturedVideoUrl ? { background: 'rgba(0,0,0,0.04)', borderColor: 'rgba(0,0,0,0.12)', color: 'rgba(0,0,0,0.55)' } : undefined}
+                  style={(capturedImage || capturedVideoUrl) ? { background: 'rgba(0,0,0,0.04)', borderColor: 'rgba(0,0,0,0.12)', color: 'rgba(0,0,0,0.55)' } : undefined}
                 >
                   MINT :: PAY GAS <span className="wld-gas-tag">{WLD_GAS_FEE}</span>
                 </button>
@@ -2693,12 +2692,12 @@ export default function Home() {
                 <div className="wid-verified-sub">Zero-knowledge proof validated · Initiating on-chain mint</div>
               </div>
             )}
-            {replayOpen && capturedVideoUrl && (
-              // Fullscreen in-app replay. The <video> here is mounted
-              // unmuted with native controls so iOS Safari hands off to
-              // its built-in player gestures (scrub, AirPlay, etc.). The
-              // close button returns the user to the verify flow without
-              // leaving the page.
+            {replayOpen && (capturedImage || capturedVideoUrl) && (
+              // Fullscreen in-app preview. Renders either the captured
+              // photo or the captured video (with audio + native
+              // controls) and dismisses back to the verify flow with
+              // the × button or a backdrop tap — no new tab, no lost
+              // back navigation.
               <div
                 style={{
                   position: 'absolute',
@@ -2711,22 +2710,37 @@ export default function Home() {
                 }}
                 onClick={() => setReplayOpen(false)}
               >
-                <video
-                  src={capturedVideoUrl}
-                  controls
-                  autoPlay
-                  playsInline
-                  style={{
-                    maxWidth: '100%',
-                    maxHeight: '100%',
-                    background: '#000',
-                  }}
-                  onClick={(e) => e.stopPropagation()}
-                />
+                {capturedVideoUrl ? (
+                  <video
+                    src={capturedVideoUrl}
+                    controls
+                    autoPlay
+                    playsInline
+                    style={{
+                      maxWidth: '100%',
+                      maxHeight: '100%',
+                      background: '#000',
+                    }}
+                    onClick={(e) => e.stopPropagation()}
+                  />
+                ) : (
+                  capturedImage && (
+                    <img
+                      src={capturedImage}
+                      alt="Captured"
+                      style={{
+                        maxWidth: '100%',
+                        maxHeight: '100%',
+                        objectFit: 'contain',
+                      }}
+                      onClick={(e) => e.stopPropagation()}
+                    />
+                  )
+                )}
                 <button
                   type="button"
                   onClick={(e) => { e.stopPropagation(); setReplayOpen(false); }}
-                  aria-label="Close replay"
+                  aria-label="Close preview"
                   style={{
                     position: 'absolute',
                     top: 14,
