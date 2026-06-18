@@ -1255,19 +1255,21 @@ canvas { display: none; }
   opacity: 0;
 }
 .splash.phase1 .splash-check {
-  animation: checkSpin 1.2s cubic-bezier(0.2, 0, 0.2, 1) 0.4s forwards;
+  animation: checkSpin 1.6s cubic-bezier(.45,.02,.4,1) 0.3s forwards;
 }
 .splash.phase1 .splash-check path {
   stroke-dasharray: 100;
   stroke-dashoffset: 0;
 }
 @keyframes checkSpin {
-  0% { opacity: 0; transform: translate(-50%, -50%) scale(0) rotate(0deg); }
-  20% { opacity: 1; transform: translate(-50%, -50%) scale(1) rotate(180deg); }
-  50% { transform: translate(-50%, -50%) scale(1.1) rotate(540deg); }
-  75% { transform: translate(-50%, -50%) scale(1) rotate(680deg); }
-  90% { transform: translate(-50%, -50%) scale(0.98) rotate(715deg); }
-  100% { opacity: 1; transform: translate(-50%, -50%) scale(1) rotate(720deg); }
+  /* Same beat as the in-app icon animation: snap in, spin three full
+     revolutions, overshoot a touch, spring back to the upright position
+     and settle there. */
+  0%   { opacity: 0; transform: translate(-50%, -50%) scale(0)   rotate(0deg); }
+  15%  { opacity: 1; transform: translate(-50%, -50%) scale(1)   rotate(360deg); }
+  60%  {            transform: translate(-50%, -50%) scale(1)   rotate(1110deg); }
+  75%  {            transform: translate(-50%, -50%) scale(1)   rotate(1065deg); }
+  100% { opacity: 1; transform: translate(-50%, -50%) scale(1)   rotate(1080deg); }
 }
 .splash.phase2 .splash-check {
   animation: checkBounce 0.35s cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
@@ -1302,41 +1304,13 @@ canvas { display: none; }
 .splash-text-zk {
   font-weight: 800;
   font-size: 44px;
-  background: linear-gradient(
-    180deg,
-    #1a1a2e 0%,
-    #2d2d44 25%,
-    #555577 40%,
-    #f0f0ff 48%,
-    #ffffff 50%,
-    #f0f0ff 52%,
-    #555577 60%,
-    #2d2d44 75%,
-    #1a1a2e 100%
-  );
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-  filter: drop-shadow(0 2px 3px rgba(0,0,0,0.4)) drop-shadow(0 0 1px rgba(0,0,0,0.3));
+  color: #000;
   position: relative;
 }
 .splash-text-truth {
   font-weight: 900;
   font-size: 44px;
-  background: linear-gradient(
-    180deg,
-    #0a0a1a 0%,
-    #1a1a33 20%,
-    #444466 38%,
-    #e8e8ff 47%,
-    #ffffff 50%,
-    #e8e8ff 53%,
-    #444466 62%,
-    #1a1a33 80%,
-    #0a0a1a 100%
-  );
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-  filter: drop-shadow(0 2px 3px rgba(0,0,0,0.5)) drop-shadow(0 0 1px rgba(0,0,0,0.3));
+  color: #000;
   position: relative;
 }
 
@@ -1452,6 +1426,9 @@ export default function Home() {
   // (the previous "open in new tab" path made iOS Safari swallow the
   // tab and there was no obvious way back to the verify flow).
   const [replayOpen, setReplayOpen] = useState(false);
+  // Free-form user comment attached to the capture (displayed on the
+  // verify screen as the dominant input above the action buttons).
+  const [captureComment, setCaptureComment] = useState("");
 
   // Snapshot key for localStorage. World App's auto-redirect after
   // verification re-loads the page in a fresh tab, dropping React state.
@@ -2525,60 +2502,10 @@ export default function Home() {
         {screen === "worldid" && proofData && (
           <div className="wid-screen">
             {(capturedImage || capturedVideoUrl) ? (
-              // Both photo and video captures present the same clean white
-              // card with the zkTruth brand icon (speech-bubble + check)
-              // centered. The bubble and check are separate SVG layers so
-              // the check can rotate independently, locking visually as it
-              // "stamps" onto its correct position each cycle.
-              <div
-                className="wid-bg"
-                style={{
-                  background: '#fff',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                }}
-              >
-                <div className="zk-icon-wrap">
-                  <svg
-                    className="zk-icon-bubble"
-                    viewBox="0 0 200 200"
-                    fill="none"
-                    stroke="#111"
-                    strokeWidth="14"
-                    strokeLinejoin="round"
-                  >
-                    {/* Rounded-square speech bubble with a small tail
-                        on the bottom-left, matching the iconography in
-                        the user-supplied brand mark. */}
-                    <path d="
-                      M 50 28
-                      L 158 28
-                      Q 184 28 184 54
-                      L 184 130
-                      Q 184 156 158 156
-                      L 96 156
-                      L 68 184
-                      L 74 156
-                      L 50 156
-                      Q 24 156 24 130
-                      L 24 54
-                      Q 24 28 50 28 Z
-                    " />
-                  </svg>
-                  <svg
-                    className="zk-icon-check"
-                    viewBox="0 0 200 200"
-                    fill="none"
-                    stroke="#00c864"
-                    strokeWidth="20"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                  >
-                    <path d="M 64 96 L 92 124 L 144 64" />
-                  </svg>
-                </div>
-              </div>
+              // Plain white card. The captured photo/video lives behind
+              // the Replay/View modal — here the background is just clean
+              // canvas for the comment input and button stack.
+              <div className="wid-bg" style={{ background: '#fff' }} />
             ) : (
               <div className="wid-bg" style={{background:'#111'}} />
             )}
@@ -2613,6 +2540,38 @@ export default function Home() {
                   </>
                 )}
               </div>
+              {(capturedImage || capturedVideoUrl) && (
+                // Free-form comment input sits in the top half of the
+                // white card. The user types whatever caption they want
+                // attached to this capture; the button stack at the
+                // bottom is where the mint actions live.
+                <textarea
+                  value={captureComment}
+                  onChange={(e) => setCaptureComment(e.target.value)}
+                  placeholder="Add a comment about this capture..."
+                  style={{
+                    position: 'absolute',
+                    top: 80,
+                    left: 16,
+                    right: 16,
+                    height: '42%',
+                    padding: '14px 16px',
+                    border: '1.5px solid #111',
+                    borderRadius: 14,
+                    background: '#fff',
+                    color: '#111',
+                    fontFamily: 'Space Mono, monospace',
+                    fontSize: 14,
+                    lineHeight: 1.45,
+                    resize: 'none',
+                    outline: 'none',
+                    boxShadow: '0 4px 18px rgba(0,0,0,0.06)',
+                    boxSizing: 'border-box',
+                    WebkitAppearance: 'none',
+                    zIndex: 4,
+                  }}
+                />
+              )}
               <div className="wid-bottom">
                 {!(capturedImage || capturedVideoUrl) && (
                   // The hash + timestamp belong on the cinematic
