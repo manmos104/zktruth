@@ -1248,10 +1248,16 @@ canvas { display: none; }
 }
 
 .splash-check {
+  /* Mirror the bubble's geometry so the check path is laid out in the
+     same coordinate space — that way the check sits at the bubble's
+     visual center (104, 92 in the 200-unit viewBox) and stays put
+     while it rotates. */
   position: absolute;
-  top: 44%; left: 50%;
-  transform: translate(-50%, -50%);
-  width: 95px; height: 95px;
+  top: 0; left: 0;
+  width: 180px; height: 180px;
+  /* Rotate around the check's own centroid rather than the SVG
+     bounding box, so the spin doesn't wobble. */
+  transform-origin: 52% 46%;
   opacity: 0;
 }
 .splash.phase1 .splash-check {
@@ -1262,24 +1268,23 @@ canvas { display: none; }
   stroke-dashoffset: 0;
 }
 @keyframes checkSpin {
-  /* Same beat as the in-app icon animation: snap in, spin three full
-     revolutions, overshoot a touch, spring back to the upright position
-     and settle there. */
-  0%   { opacity: 0; transform: translate(-50%, -50%) scale(0)   rotate(0deg); }
-  15%  { opacity: 1; transform: translate(-50%, -50%) scale(1)   rotate(360deg); }
-  60%  {            transform: translate(-50%, -50%) scale(1)   rotate(1110deg); }
-  75%  {            transform: translate(-50%, -50%) scale(1)   rotate(1065deg); }
-  100% { opacity: 1; transform: translate(-50%, -50%) scale(1)   rotate(1080deg); }
+  /* Snap in, spin three full revolutions, overshoot a touch, spring
+     back to the upright position and settle there. */
+  0%   { opacity: 0; transform: scale(0)   rotate(0deg); }
+  15%  { opacity: 1; transform: scale(1)   rotate(360deg); }
+  60%  {            transform: scale(1)   rotate(1110deg); }
+  75%  {            transform: scale(1)   rotate(1065deg); }
+  100% { opacity: 1; transform: scale(1)   rotate(1080deg); }
 }
 .splash.phase2 .splash-check {
   animation: checkBounce 0.35s cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
   opacity: 1;
-  transform: translate(-50%, -50%) scale(1) rotate(720deg);
+  transform: scale(1) rotate(1080deg);
 }
 @keyframes checkBounce {
-  0% { transform: translate(-50%, -50%) scale(1) rotate(720deg); }
-  50% { transform: translate(-50%, -50%) scale(1.25) rotate(720deg); }
-  100% { transform: translate(-50%, -50%) scale(1) rotate(720deg); }
+  0%   { transform: scale(1)    rotate(1080deg); }
+  50%  { transform: scale(1.18) rotate(1080deg); }
+  100% { transform: scale(1)    rotate(1080deg); }
 }
 
 .splash-logo-row {
@@ -2424,9 +2429,11 @@ export default function Home() {
               " />
             </svg>
             {/* Animated green check overlay — spins through three full
-                rotations, overshoots a hair and springs back into place. */}
-            <svg className="splash-check" viewBox="0 0 200 200" fill="none" stroke="#00c864" strokeWidth="22" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M 60 96 L 92 128 L 144 64" />
+                rotations, overshoots a hair and springs back into place.
+                Drawn in the same 200-unit viewBox as the bubble so the
+                check's centroid lands on the bubble's body center. */}
+            <svg className="splash-check" viewBox="0 0 200 200" fill="none" stroke="#00c864" strokeWidth="26" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M 60 102 L 94 136 L 150 50" />
             </svg>
           </div>
           <div className="splash-logo-row">
@@ -2836,23 +2843,44 @@ export default function Home() {
 
         {screen === "share" && proofData && (
           <div className="wid-screen">
-            {capturedImage ? <img src={capturedImage} alt="" className="wid-bg" /> : capturedVideoUrl ? <video src={capturedVideoUrl} className="wid-bg" autoPlay loop muted playsInline /> : <div className="wid-bg" style={{background:'#111'}} />}
+            <div className="wid-bg" style={{ background: '#fff' }} />
             <div className="wid-overlay">
               <div className="wid-top">
-                <div style={{display:'flex',alignItems:'center',gap:10}}>
-                  <button className="wid-back" onClick={handleReset}>✕</button>
-                  <svg className="logo-icon" viewBox="0 0 24 24" fill="none" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v10z" stroke="white"/><path d="m8 9.5 2.5 2.5 5-5" stroke="#00c864"/></svg>
-                  <div className="logo-text"><span className="logo-zk">zk</span><span className="logo-truth">Truth</span></div>
-                  <div className="live-badge"><div className="live-dot" />LIVE</div>
-                </div>
-                <div className="wid-badge">{mintMode === "verified" ? "ZKP VERIFIED" : "UNVERIFIED"}</div>
+                <button
+                  className="wid-back"
+                  onClick={handleReset}
+                  style={{ background: 'rgba(0,0,0,0.08)', color: '#111' }}
+                >✕</button>
+                <div
+                  className="wid-badge"
+                  style={{ background: '#111', color: '#fff', border: 'none' }}
+                >{mintMode === "verified" ? "ZKP VERIFIED" : "UNVERIFIED"}</div>
               </div>
               <div className="wid-bottom">
-                <div className="wid-hash">SHA-256: {proofData.hash.slice(0,22)}...</div>
-                <div className="wid-time">{proofData.timestamp.split('T')[1]?.split('.')[0]} UTC • {proofData.chain} • #{proofData.tokenId.toString().padStart(6,'0')}</div>
-                <div style={{display:'flex',gap:8}}>
-                  <button className="wid-verify-btn" style={{flex:1}} onClick={() => openSnsShare("share")}>SHARE</button>
-                  <button className="wid-verify-btn" style={{flex:1,background:'linear-gradient(135deg, #00ff87, #00cc66)',color:'#000'}} onClick={() => { setScreen("minting"); startMinting(); }}>NFT MINT</button>
+                <div className="wid-hash" style={{ color: '#444' }}>SHA-256: {proofData.hash.slice(0,22)}...</div>
+                <div className="wid-time" style={{ color: '#777' }}>{proofData.timestamp.split('T')[1]?.split('.')[0]} UTC • {proofData.chain} • #{proofData.tokenId.toString().padStart(6,'0')}</div>
+                <div style={{display:'flex',gap:10}}>
+                  <button
+                    className="wid-verify-btn"
+                    onClick={() => openSnsShare("share")}
+                    style={{
+                      flex: 1,
+                      background: '#fff',
+                      border: '1.5px solid #111',
+                      color: '#111',
+                      boxShadow: 'none',
+                    }}
+                  >SHARE</button>
+                  <button
+                    className="wid-verify-btn"
+                    onClick={() => { setScreen("minting"); startMinting(); }}
+                    style={{
+                      flex: 1,
+                      background: '#111',
+                      color: '#fff',
+                      boxShadow: '0 4px 18px rgba(0,0,0,0.18)',
+                    }}
+                  >NFT MINT</button>
                 </div>
               </div>
             </div>
