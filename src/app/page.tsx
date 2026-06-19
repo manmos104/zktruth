@@ -2405,11 +2405,28 @@ export default function Home() {
 
         <div className={`splash ${splashPhase >= 1 ? 'phase1' : ''} ${splashPhase >= 2 ? 'phase2' : ''} ${splashPhase >= 3 ? 'fade-out' : ''} ${splashPhase >= 4 ? 'gone' : ''}`}>
           <div className="splash-icon-wrap">
-            <svg className="splash-bubble" viewBox="0 0 24 24" fill="none" stroke="#000000" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v10z"/>
+            {/* Brand bubble: rounded square with a small bottom-left
+                tail, matching the icon in the zkTruth brand mark. */}
+            <svg className="splash-bubble" viewBox="0 0 200 200" fill="none" stroke="#000" strokeWidth="14" strokeLinejoin="round">
+              <path d="
+                M 50 28
+                L 158 28
+                Q 184 28 184 54
+                L 184 130
+                Q 184 156 158 156
+                L 96 156
+                L 68 184
+                L 74 156
+                L 50 156
+                Q 24 156 24 130
+                L 24 54
+                Q 24 28 50 28 Z
+              " />
             </svg>
-            <svg className="splash-check" viewBox="0 0 24 24" fill="none" stroke="#00c864" strokeWidth="2.8" strokeLinecap="round" strokeLinejoin="round">
-              <path d="m8 12.5 2.5 2.5 5-5"/>
+            {/* Animated green check overlay — spins through three full
+                rotations, overshoots a hair and springs back into place. */}
+            <svg className="splash-check" viewBox="0 0 200 200" fill="none" stroke="#00c864" strokeWidth="22" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M 60 96 L 92 128 L 144 64" />
             </svg>
           </div>
           <div className="splash-logo-row">
@@ -2653,14 +2670,9 @@ export default function Home() {
                     <div>{worldIdError}</div>
                   </div>
                 )}
-                <button
-                  className="wid-gas-btn"
-                  onClick={handleUnverifiedMint}
-                  disabled={worldIdVerifying || worldIdVerified}
-                  style={(capturedImage || capturedVideoUrl) ? { background: 'rgba(0,0,0,0.04)', borderColor: 'rgba(0,0,0,0.12)', color: 'rgba(0,0,0,0.55)' } : undefined}
-                >
-                  MINT :: PAY GAS <span className="wld-gas-tag">{WLD_GAS_FEE}</span>
-                </button>
+                {/* MINT :: PAY GAS removed — the NFT MINT button above
+                    is now the single mint affordance, going active once
+                    World ID verification completes. */}
               </div>
             </div>
             {worldIdVerified && (
