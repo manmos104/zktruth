@@ -263,9 +263,15 @@ export function WorldIdVerifyButton({
           // Proof-of-Capture we don't need a higher tier of identity.
           preset={orbLegacy({})}
           return_to={
+            // Use a #fragment instead of changing the full URL so iOS
+            // Safari treats it as same-document navigation and refocuses
+            // the existing tab instead of opening a brand new one. The
+            // existing tab keeps its IDKit widget alive long enough to
+            // catch the bridge proof, avoiding a second deep-link round
+            // trip into World App.
             typeof window !== 'undefined'
-              ? window.location.href
-              : 'https://zktruth.vercel.app/'
+              ? `${window.location.origin}${window.location.pathname}#z`
+              : 'https://zktruth.vercel.app/#z'
           }
           handleVerify={handleVerify}
           onSuccess={onSuccess}

@@ -1256,8 +1256,9 @@ canvas { display: none; }
   top: 0; left: 0;
   width: 180px; height: 180px;
   /* Rotate around the check's own centroid rather than the SVG
-     bounding box, so the spin doesn't wobble. */
-  transform-origin: 52% 46%;
+     bounding box, so the spin doesn't wobble. Matches the new path
+     bbox centroid at (104, 94) in the 200-unit viewBox. */
+  transform-origin: 52% 47%;
   opacity: 0;
 }
 .splash.phase1 .splash-check {
@@ -2430,10 +2431,10 @@ export default function Home() {
             </svg>
             {/* Animated green check overlay — spins through three full
                 rotations, overshoots a hair and springs back into place.
-                Drawn in the same 200-unit viewBox as the bubble so the
-                check's centroid lands on the bubble's body center. */}
-            <svg className="splash-check" viewBox="0 0 200 200" fill="none" stroke="#00c864" strokeWidth="26" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M 60 102 L 94 136 L 150 50" />
+                Path is laid out so its bounding-box centroid (104, 94)
+                lands on the bubble body's visual center. */}
+            <svg className="splash-check" viewBox="0 0 200 200" fill="none" stroke="#00c864" strokeWidth="18" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M 62 90 L 96 124 L 146 64" />
             </svg>
           </div>
           <div className="splash-logo-row">
