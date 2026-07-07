@@ -2973,13 +2973,14 @@ export default function Home() {
                 <div className="wid-badge">SHARE PROOF</div>
               </div>
               <div className="wid-bottom">
-                <button className="wid-verify-btn" onClick={() => {
-                  // URL-only X intent so the timeline renders our Twitter Card
-                  // (frame + thumbnail) instead of uploading the raw video.
-                  const url = buildProofUrl();
-                  const text = 'Verified proof of capture via zkTruth';
-                  window.open(`https://x.com/intent/tweet?text=${encodeURIComponent(text)}&url=${encodeURIComponent(url)}`, '_blank');
-                }}>
+                {/* POST TO X now routes through the same Web Share path
+                    as the SHARE button up on the wid-share screen. We
+                    pass the file to the iOS share sheet so X's compose
+                    opens with the actual captured media attached
+                    (which is what the user asked for) instead of the
+                    old `x.com/intent/tweet?url=` route that always
+                    swapped the media for an OG card. */}
+                <button className="wid-verify-btn" onClick={handleShareWithImage}>
                   POST TO X
                 </button>
                 <button className="wid-gas-btn" onClick={() => { const url = buildProofUrl(); window.open(`https://warpcast.com/~/compose?text=${encodeURIComponent('Verified proof of capture via zkTruth\n\n' + url)}&embeds[]=${encodeURIComponent(url)}`, '_blank'); }}>
