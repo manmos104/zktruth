@@ -1255,10 +1255,9 @@ canvas { display: none; }
   position: absolute;
   top: 0; left: 0;
   width: 180px; height: 180px;
-  /* Rotate around the check's bounding-box centre. With the new
-     reference-matched path the bbox spans x[72,152] × y[60,105],
-     so the centre lands at (112, 82) = (56%, 41%). */
-  transform-origin: 56% 41%;
+  /* Rotate around the check's bounding-box centre, which is placed
+     exactly on the bubble body's centre (104, 92) = (52%, 46%). */
+  transform-origin: 52% 46%;
   opacity: 0;
 }
 .splash.phase1 .splash-check {
@@ -2431,12 +2430,12 @@ export default function Home() {
             </svg>
             {/* Animated green check overlay — spins through three full
                 rotations, overshoots a hair and springs back into place.
-                Path traced to match the balance of the reference brand
-                mark: V vertex sits on the bubble body's centre x (~104)
-                and about a body-height quarter below the centre y, with
-                the right stroke reaching high into the upper-right. */}
+                Dimensions chosen so the bounding box (x[56,152], y[61,123])
+                is centred exactly on the bubble body's centre (104, 92),
+                giving a clean ✓ read with the classic ~1:2 stroke-length
+                ratio and no perceived drift. */}
             <svg className="splash-check" viewBox="0 0 200 200" fill="none" stroke="#00c864" strokeWidth="18" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M 72 86 L 104 105 L 152 60" />
+              <path d="M 56 97 L 88 123 L 152 61" />
             </svg>
           </div>
           <div className="splash-logo-row">
