@@ -1434,6 +1434,11 @@ export default function Home() {
   const [mintMode, setMintMode] = useState("verified");
   const [snsFromScreen, setSnsFromScreen] = useState("share");
   const [copyStatus, setCopyStatus] = useState("");
+  // Ephemeral toast for the SHARE flow. Renders as a floating message
+  // over the wid-share screen so the user knows whether the image
+  // attached to the share sheet, whether text landed on the clipboard,
+  // or whether we fell through to the download fallback.
+  const [shareStatus, setShareStatus] = useState("");
   // On-screen recorder diagnostics for debugging audio capture on devices
   // where we don't have access to a JS console (e.g., iPhone Safari).
   const [recordDebug, setRecordDebug] = useState<string>("");
@@ -2343,12 +2348,19 @@ export default function Home() {
   }, [proofData, gpsLocation]);
 
   const handleShareWithImage = useCallback(async () => {
-    // Build the tweet body: rich metadata WITHOUT any URL. When X's iOS
-    // app sees a URL inside `text`, it silently treats the whole share
-    // as a URL-share, drops the attached file, and lets Twitter fetch
-    // the OG card from the URL instead — exactly the failure mode the
-    // user hit. Keeping the payload URL-free forces X into the
-    // media+text compose path where the photo actually attaches.
+    // Build the tweet body: rich metadata WITHOUT any URL. iOS X app
+    // silently swaps a file share for a URL card when text contains a
+    // URL; keeping the payload URL-free is only half the fix.
+    //
+    // The other half — and the root cause we hit on the previous
+    // deploy — is that combined `{text, files}` payloads are still
+    // interpreted by iOS's system share handler as "text-first" for
+    // some targets. When the share is routed to X that way, the file
+    // is dropped and only the text lands in the composer. There's no
+    // way to force X's iOS app to accept both; picking one is
+    // required. We pick the file. Metadata text goes to the clipboard
+    // so the user can paste it into the composer after the image is
+    // attached.
     const proofUrl = buildProofUrl();
     const hashLine = proofData?.hash
       ? `Hash: ${proofData.hash.slice(0, 12)}...${proofData.hash.slice(-6)}`
@@ -2369,8 +2381,9 @@ export default function Home() {
       locationLine,
     ].filter(Boolean).join('\n');
 
-    // Build the file object (image or video) from the in-memory capture.
-    // Everything stays client-side — no upload, so no storage cost.
+    // Build the file object (image or video) from the in-memory
+    // capture. Everything stays client-side — no upload, no storage
+    // cost.
     let file: File | null = null;
     if (capturedVideo) {
       const ext = capturedVideo.type.includes('mp4') ? 'mp4' : 'webm';
@@ -2385,52 +2398,42 @@ export default function Home() {
       file = new File([blob], 'zktruth-proof.jpg', { type: mime });
     }
 
-    // Primary path: Web Share API. iOS 15+ Safari passes both `text` and
-    // `files` through to the target app when the app supports files.
-    // The X iOS app registers as a file-accepting share target since
-    // 2023, so picking X from the sheet attaches the media to the
-    // compose window and pastes `text` as the tweet body.
-    if (typeof navigator.share === 'function') {
-      try {
-        if (file) {
-          const data: ShareData = { text: shareText, files: [file] };
-          // `canShare` is the guard iOS Safari requires before allowing a
-          // file to travel through the share sheet. Some versions return
-          // false even when they'd succeed — we retry with text-only in
-          // the catch block below rather than trust `canShare` blindly.
-          if (typeof navigator.canShare !== 'function' || navigator.canShare(data)) {
-            await navigator.share(data);
-            return;
-          }
-          // canShare said no — try a file-only share and stash the text
-          // in the clipboard so the user can paste it into X compose.
-          try { await navigator.clipboard.writeText(shareText); } catch { /* ignore */ }
-          const fileOnly: ShareData = { files: [file] };
-          if (typeof navigator.canShare === 'function' && navigator.canShare(fileOnly)) {
-            await navigator.share(fileOnly);
-            setCopyStatus("TEXT COPIED — PASTE INTO X");
-            setTimeout(() => setCopyStatus(""), 3500);
-            return;
-          }
+    // Copy metadata text to the clipboard up front, BEFORE opening the
+    // share sheet. iOS revokes clipboard-write access when the page
+    // loses focus, so this has to happen inside the same user-gesture
+    // that triggered the share. Paste-into-composer becomes the user's
+    // muscle-memory: attach image → paste text.
+    try {
+      await navigator.clipboard.writeText(shareText);
+    } catch { /* ignore — best-effort */ }
+
+    // Primary path: file-only Web Share. iOS 15+ Safari can pass a File
+    // through the system share sheet; when the user picks X the image
+    // lands in the composer as attached media. No text payload means
+    // X can't decide to treat this as a URL share.
+    if (typeof navigator.share === 'function' && file) {
+      const fileOnly: ShareData = { files: [file] };
+      const canShareFile =
+        typeof navigator.canShare !== 'function' || navigator.canShare(fileOnly);
+      if (canShareFile) {
+        try {
+          await navigator.share(fileOnly);
+          // Success — remind the user their metadata is on the clipboard.
+          setShareStatus("画像を共有。Xで長押しペーストで本文貼付");
+          setTimeout(() => setShareStatus(""), 5000);
+          return;
+        } catch (e) {
+          if ((e as Error)?.name === 'AbortError') return;
+          // Any other error: fall through to download fallback.
         }
-        // No file (unlikely) — share the text body directly.
-        await navigator.share({ text: shareText });
-        return;
-      } catch (e) {
-        if ((e as Error)?.name === 'AbortError') return;
-        // fall through to manual fallback
       }
     }
 
-    // Last-resort fallback for browsers without Web Share (desktop, old
-    // Android). No native share sheet is available, so we can't hand X
-    // the file directly. Best we can do: copy the metadata + URL to the
-    // clipboard, download the media so the user has it locally to
-    // attach manually, and open X compose in a new tab. Including the
-    // URL here is fine because desktop X compose treats it as a link
-    // in the body, not a card-swap the way the iOS app does.
-    const fallbackText = `${shareText}\n\n${proofUrl}`;
-    try { await navigator.clipboard.writeText(fallbackText); } catch { /* ignore */ }
+    // Fallback: no Web Share, no file, or canShare said no. Download
+    // the media so the user has it locally to attach manually, then
+    // open X compose in a new tab. Including the URL in the fallback
+    // text is fine here — it's the "no image" degraded path and the
+    // URL card is at least something.
     if (file) {
       const a = document.createElement('a');
       const url = URL.createObjectURL(file);
@@ -2439,12 +2442,14 @@ export default function Home() {
       a.click();
       setTimeout(() => URL.revokeObjectURL(url), 1000);
     }
+    const fallbackText = `${shareText}\n\n${proofUrl}`;
+    try { await navigator.clipboard.writeText(fallbackText); } catch { /* ignore */ }
     window.open(
       `https://x.com/intent/tweet?text=${encodeURIComponent(fallbackText)}`,
       '_blank',
     );
-    setCopyStatus("MEDIA DOWNLOADED — ATTACH TO POST");
-    setTimeout(() => setCopyStatus(""), 4000);
+    setShareStatus("画像をダウンロード。Xで手動添付してください");
+    setTimeout(() => setShareStatus(""), 6000);
   }, [capturedImage, capturedVideo, buildProofUrl, proofData, gpsLocation, gpsCoords]);
 
   const handleCopyLink = useCallback(() => {
@@ -2992,6 +2997,36 @@ export default function Home() {
           </div>
         )}
 
+        {/* Global share-flow toast. Renders on top of everything while
+            the SHARE handler is briefly reporting status back to the
+            user — "image shared, text copied", "download fallback", etc.
+            Positioned near the top so it doesn't cover the compose
+            button on native share sheets. */}
+        {shareStatus && (
+          <div
+            style={{
+              position: 'fixed',
+              top: 24,
+              left: '50%',
+              transform: 'translateX(-50%)',
+              background: 'rgba(0,0,0,0.88)',
+              color: '#fff',
+              padding: '10px 18px',
+              borderRadius: 12,
+              fontSize: 13,
+              fontWeight: 600,
+              letterSpacing: '0.02em',
+              zIndex: 10000,
+              maxWidth: '86%',
+              textAlign: 'center',
+              boxShadow: '0 6px 24px rgba(0,0,0,0.35)',
+              backdropFilter: 'blur(8px)',
+              pointerEvents: 'none',
+            }}
+          >
+            {shareStatus}
+          </div>
+        )}
       </div>
     </>
   );
