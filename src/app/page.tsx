@@ -2398,27 +2398,44 @@ export default function Home() {
       file = new File([blob], 'zktruth-proof.jpg', { type: mime });
     }
 
-    // Copy metadata text to the clipboard up front, BEFORE opening the
-    // share sheet. iOS revokes clipboard-write access when the page
-    // loses focus, so this has to happen inside the same user-gesture
-    // that triggered the share. Paste-into-composer becomes the user's
-    // muscle-memory: attach image → paste text.
+    // Copy metadata text to the clipboard as a safety net inside the
+    // same user gesture — if the share payload somehow loses the text
+    // field (older iOS versions, non-X targets), the user can still
+    // paste. Best-effort; ignore permission errors.
     try {
       await navigator.clipboard.writeText(shareText);
-    } catch { /* ignore — best-effort */ }
+    } catch { /* ignore */ }
 
-    // Primary path: file-only Web Share. iOS 15+ Safari can pass a File
-    // through the system share sheet; when the user picks X the image
-    // lands in the composer as attached media. No text payload means
-    // X can't decide to treat this as a URL share.
+    // Primary path: Web Share with BOTH files and text. The text field
+    // has no URL substring, which is the trigger that used to make
+    // X's iOS app swap the file share for a URL-card share. With just
+    // metadata (Hash / Time / Location), X treats it as a normal media
+    // + text compose and pre-fills the tweet body while attaching the
+    // image. If canShare rejects the combined payload we fall back to
+    // file-only (image still attaches, user pastes from clipboard).
     if (typeof navigator.share === 'function' && file) {
+      const combined: ShareData = { text: shareText, files: [file] };
+      const canShareCombined =
+        typeof navigator.canShare !== 'function' || navigator.canShare(combined);
+      if (canShareCombined) {
+        try {
+          await navigator.share(combined);
+          setShareStatus("画像＋本文をXに送信済み");
+          setTimeout(() => setShareStatus(""), 4000);
+          return;
+        } catch (e) {
+          if ((e as Error)?.name === 'AbortError') return;
+          // Some iOS versions throw NotAllowedError for combined
+          // payloads even when canShare said yes — retry file-only.
+        }
+      }
+      // Combined path unavailable / rejected — file-only + clipboard.
       const fileOnly: ShareData = { files: [file] };
       const canShareFile =
         typeof navigator.canShare !== 'function' || navigator.canShare(fileOnly);
       if (canShareFile) {
         try {
           await navigator.share(fileOnly);
-          // Success — remind the user their metadata is on the clipboard.
           setShareStatus("画像を共有。Xで長押しペーストで本文貼付");
           setTimeout(() => setShareStatus(""), 5000);
           return;
