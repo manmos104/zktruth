@@ -2343,10 +2343,32 @@ export default function Home() {
   }, [proofData, gpsLocation]);
 
   const handleShareWithImage = useCallback(async () => {
+    // Build the tweet body: rich metadata + URL. The user attaches the
+    // photo/video directly through the iOS share sheet, so the actual
+    // media appears in the tweet, the URL renders as a link, and no OG
+    // banner is generated (X hides the card when media is attached).
     const proofUrl = buildProofUrl();
-    const shareText = 'Verified proof of capture via zkTruth\n\n' + proofUrl;
+    const hashLine = proofData?.hash
+      ? `Hash: ${proofData.hash.slice(0, 12)}...${proofData.hash.slice(-6)}`
+      : '';
+    const timeLine = proofData?.timestamp
+      ? `Time: ${proofData.timestamp}`
+      : '';
+    const locationLine = gpsLocation
+      ? `Location: ${gpsLocation}`
+      : gpsCoords && !gpsCoords.startsWith('Acquiring')
+        ? `Location: ${gpsCoords}`
+        : '';
+    const shareText = [
+      '✓ Verified Proof of Capture via zkTruth',
+      '',
+      hashLine,
+      timeLine,
+      locationLine,
+    ].filter(Boolean).join('\n') + `\n\n${proofUrl}`;
 
-    // Build file
+    // Build the file object (image or video) from the in-memory capture.
+    // Everything stays client-side — no upload, so no storage cost.
     let file: File | null = null;
     if (capturedVideo) {
       const ext = capturedVideo.type.includes('mp4') ? 'mp4' : 'webm';
@@ -2361,27 +2383,62 @@ export default function Home() {
       file = new File([blob], 'zktruth-proof.jpg', { type: mime });
     }
 
+    // Primary path: Web Share API. iOS 15+ Safari passes both `text` and
+    // `files` through to the target app when the app supports files.
+    // The X iOS app registers as a file-accepting share target since
+    // 2023, so picking X from the sheet attaches the media to the
+    // compose window and pastes `text` as the tweet body.
     if (typeof navigator.share === 'function') {
       try {
-        // Try: file + text (text includes URL)
         if (file) {
           const data: ShareData = { text: shareText, files: [file] };
-          if (navigator.canShare?.(data)) {
+          // `canShare` is the guard iOS Safari requires before allowing a
+          // file to travel through the share sheet. Some versions return
+          // false even when they'd succeed — we retry with text-only in
+          // the catch block below rather than trust `canShare` blindly.
+          if (typeof navigator.canShare !== 'function' || navigator.canShare(data)) {
             await navigator.share(data);
             return;
           }
+          // canShare said no — try a file-only share and stash the text
+          // in the clipboard so the user can paste it into X compose.
+          try { await navigator.clipboard.writeText(shareText); } catch { /* ignore */ }
+          const fileOnly: ShareData = { files: [file] };
+          if (typeof navigator.canShare === 'function' && navigator.canShare(fileOnly)) {
+            await navigator.share(fileOnly);
+            setCopyStatus("TEXT COPIED — PASTE INTO X");
+            setTimeout(() => setCopyStatus(""), 3500);
+            return;
+          }
         }
-        // Try: text only (includes URL as plain text link)
+        // No file (unlikely) — share the text body directly.
         await navigator.share({ text: shareText });
         return;
       } catch (e) {
         if ((e as Error)?.name === 'AbortError') return;
+        // fall through to manual fallback
       }
     }
 
-    // Fallback: open X
-    window.open(`https://x.com/intent/tweet?text=${encodeURIComponent('Verified proof of capture via zkTruth')}&url=${encodeURIComponent(proofUrl)}`, '_blank');
-  }, [capturedImage, capturedVideo, buildProofUrl]);
+    // Last-resort fallback for browsers without Web Share (desktop, old
+    // Android): copy text to clipboard, download the media so the user
+    // has it locally, then open X compose in a new tab.
+    try { await navigator.clipboard.writeText(shareText); } catch { /* ignore */ }
+    if (file) {
+      const a = document.createElement('a');
+      const url = URL.createObjectURL(file);
+      a.href = url;
+      a.download = file.name;
+      a.click();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+    }
+    window.open(
+      `https://x.com/intent/tweet?text=${encodeURIComponent(shareText)}`,
+      '_blank',
+    );
+    setCopyStatus("MEDIA DOWNLOADED — ATTACH TO POST");
+    setTimeout(() => setCopyStatus(""), 4000);
+  }, [capturedImage, capturedVideo, buildProofUrl, proofData, gpsLocation, gpsCoords]);
 
   const handleCopyLink = useCallback(() => {
     const url = buildProofUrl();
