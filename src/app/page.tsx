@@ -2343,10 +2343,12 @@ export default function Home() {
   }, [proofData, gpsLocation]);
 
   const handleShareWithImage = useCallback(async () => {
-    // Build the tweet body: rich metadata + URL. The user attaches the
-    // photo/video directly through the iOS share sheet, so the actual
-    // media appears in the tweet, the URL renders as a link, and no OG
-    // banner is generated (X hides the card when media is attached).
+    // Build the tweet body: rich metadata WITHOUT any URL. When X's iOS
+    // app sees a URL inside `text`, it silently treats the whole share
+    // as a URL-share, drops the attached file, and lets Twitter fetch
+    // the OG card from the URL instead — exactly the failure mode the
+    // user hit. Keeping the payload URL-free forces X into the
+    // media+text compose path where the photo actually attaches.
     const proofUrl = buildProofUrl();
     const hashLine = proofData?.hash
       ? `Hash: ${proofData.hash.slice(0, 12)}...${proofData.hash.slice(-6)}`
@@ -2365,7 +2367,7 @@ export default function Home() {
       hashLine,
       timeLine,
       locationLine,
-    ].filter(Boolean).join('\n') + `\n\n${proofUrl}`;
+    ].filter(Boolean).join('\n');
 
     // Build the file object (image or video) from the in-memory capture.
     // Everything stays client-side — no upload, so no storage cost.
@@ -2421,9 +2423,14 @@ export default function Home() {
     }
 
     // Last-resort fallback for browsers without Web Share (desktop, old
-    // Android): copy text to clipboard, download the media so the user
-    // has it locally, then open X compose in a new tab.
-    try { await navigator.clipboard.writeText(shareText); } catch { /* ignore */ }
+    // Android). No native share sheet is available, so we can't hand X
+    // the file directly. Best we can do: copy the metadata + URL to the
+    // clipboard, download the media so the user has it locally to
+    // attach manually, and open X compose in a new tab. Including the
+    // URL here is fine because desktop X compose treats it as a link
+    // in the body, not a card-swap the way the iOS app does.
+    const fallbackText = `${shareText}\n\n${proofUrl}`;
+    try { await navigator.clipboard.writeText(fallbackText); } catch { /* ignore */ }
     if (file) {
       const a = document.createElement('a');
       const url = URL.createObjectURL(file);
@@ -2433,7 +2440,7 @@ export default function Home() {
       setTimeout(() => URL.revokeObjectURL(url), 1000);
     }
     window.open(
-      `https://x.com/intent/tweet?text=${encodeURIComponent(shareText)}`,
+      `https://x.com/intent/tweet?text=${encodeURIComponent(fallbackText)}`,
       '_blank',
     );
     setCopyStatus("MEDIA DOWNLOADED — ATTACH TO POST");
