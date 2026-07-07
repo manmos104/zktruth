@@ -1231,13 +1231,21 @@ canvas { display: none; }
 .splash.gone { display: none; }
 
 .splash-icon-wrap {
-  width: 180px; height: 180px;
+  /* Container matches bubble PNG aspect ratio 378:382. */
+  width: 220px;
+  height: 222px;
   position: relative;
   margin-bottom: 28px;
 }
+/* Bubble is the user's own brand asset, rendered as-is. Its own PNG
+   contains the outline + white interior, so no ghost of the check. */
 .splash-bubble {
-  width: 180px; height: 180px;
+  position: absolute;
+  top: 0; left: 0;
+  width: 100%;
+  height: 100%;
   opacity: 0;
+  display: block;
 }
 .splash.phase1 .splash-bubble {
   animation: bubbleIn 0.6s cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
@@ -1247,44 +1255,47 @@ canvas { display: none; }
   to { opacity: 1; transform: scale(1); }
 }
 
+/* Check overlay — its own asset is a tight crop of the green check
+   from the brand PNG. Position by placing its centre at the bubble
+   body's centre (52.51%, 41.49% of the container, measured on the
+   source image), then translate -50% to reference the check's own
+   centre. Rotation happens around that same centre. */
 .splash-check {
-  /* Mirror the bubble's geometry so the check path is laid out in the
-     same coordinate space — that way the check sits at the bubble's
-     visual center (104, 92 in the 200-unit viewBox) and stays put
-     while it rotates. */
   position: absolute;
-  top: 0; left: 0;
-  width: 180px; height: 180px;
-  /* Rotate around the check's bounding-box centre, which is placed
-     exactly on the bubble body's centre (104, 92) = (52%, 46%). */
-  transform-origin: 52% 46%;
+  left: 52.51%;
+  top: 41.49%;
+  /* Check natural aspect: 214x160. Width is chosen so the check
+     matches the visual size in the source brand PNG (57% of bubble
+     width, adjusted for container padding). */
+  width: 56%;
+  height: auto;
   opacity: 0;
+  transform-origin: center center;
+  display: block;
 }
 .splash.phase1 .splash-check {
   animation: checkSpin 1.6s cubic-bezier(.45,.02,.4,1) 0.3s forwards;
 }
-.splash.phase1 .splash-check path {
-  stroke-dasharray: 100;
-  stroke-dashoffset: 0;
-}
 @keyframes checkSpin {
   /* Snap in, spin three full revolutions, overshoot a touch, spring
-     back to the upright position and settle there. */
-  0%   { opacity: 0; transform: scale(0)   rotate(0deg); }
-  15%  { opacity: 1; transform: scale(1)   rotate(360deg); }
-  60%  {            transform: scale(1)   rotate(1110deg); }
-  75%  {            transform: scale(1)   rotate(1065deg); }
-  100% { opacity: 1; transform: scale(1)   rotate(1080deg); }
+     back to the upright position and settle there. `translate(-50%,-50%)`
+     is preserved through every keyframe so the check stays centred on
+     the bubble body while rotating. */
+  0%   { opacity: 0; transform: translate(-50%,-50%) scale(0)   rotate(0deg); }
+  15%  { opacity: 1; transform: translate(-50%,-50%) scale(1)   rotate(360deg); }
+  60%  {            transform: translate(-50%,-50%) scale(1)   rotate(1110deg); }
+  75%  {            transform: translate(-50%,-50%) scale(1)   rotate(1065deg); }
+  100% { opacity: 1; transform: translate(-50%,-50%) scale(1)   rotate(1080deg); }
 }
 .splash.phase2 .splash-check {
   animation: checkBounce 0.35s cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
   opacity: 1;
-  transform: scale(1) rotate(1080deg);
+  transform: translate(-50%,-50%) scale(1) rotate(1080deg);
 }
 @keyframes checkBounce {
-  0%   { transform: scale(1)    rotate(1080deg); }
-  50%  { transform: scale(1.18) rotate(1080deg); }
-  100% { transform: scale(1)    rotate(1080deg); }
+  0%   { transform: translate(-50%,-50%) scale(1)    rotate(1080deg); }
+  50%  { transform: translate(-50%,-50%) scale(1.18) rotate(1080deg); }
+  100% { transform: translate(-50%,-50%) scale(1)    rotate(1080deg); }
 }
 
 .splash-logo-row {
@@ -2410,33 +2421,23 @@ export default function Home() {
 
         <div className={`splash ${splashPhase >= 1 ? 'phase1' : ''} ${splashPhase >= 2 ? 'phase2' : ''} ${splashPhase >= 3 ? 'fade-out' : ''} ${splashPhase >= 4 ? 'gone' : ''}`}>
           <div className="splash-icon-wrap">
-            {/* Brand bubble: rounded square with a small bottom-left
-                tail, matching the icon in the zkTruth brand mark. */}
-            <svg className="splash-bubble" viewBox="0 0 200 200" fill="none" stroke="#000" strokeWidth="14" strokeLinejoin="round">
-              <path d="
-                M 50 28
-                L 158 28
-                Q 184 28 184 54
-                L 184 130
-                Q 184 156 158 156
-                L 96 156
-                L 68 184
-                L 74 156
-                L 50 156
-                Q 24 156 24 130
-                L 24 54
-                Q 24 28 50 28 Z
-              " />
-            </svg>
-            {/* Animated green check overlay — spins through three full
-                rotations, overshoots a hair and springs back into place.
-                Dimensions chosen so the bounding box (x[56,152], y[61,123])
-                is centred exactly on the bubble body's centre (104, 92),
-                giving a clean ✓ read with the classic ~1:2 stroke-length
-                ratio and no perceived drift. */}
-            <svg className="splash-check" viewBox="0 0 200 200" fill="none" stroke="#00c864" strokeWidth="18" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M 56 97 L 88 123 L 152 61" />
-            </svg>
+            {/* Direct usage of the brand PNG assets — the bubble is a
+                pixel-perfect crop of the zkTruth logo with the green
+                check erased, and the check is the same brand asset's
+                green mark isolated to a transparent background. This
+                avoids any hand-drawn SVG approximations. */}
+            <img
+              className="splash-bubble"
+              src="/splash-bubble.png"
+              alt=""
+              draggable={false}
+            />
+            <img
+              className="splash-check"
+              src="/splash-check.png"
+              alt=""
+              draggable={false}
+            />
           </div>
           <div className="splash-logo-row">
             <span className="splash-text-zk">zk</span><span className="splash-text-truth">Truth</span>
