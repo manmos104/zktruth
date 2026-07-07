@@ -1278,9 +1278,9 @@ canvas { display: none; }
 }
 @keyframes checkSpin {
   /* Snap in, spin three full revolutions, overshoot a touch, spring
-     back to the upright position and settle there. `translate(-50%,-50%)`
-     is preserved through every keyframe so the check stays centred on
-     the bubble body while rotating. */
+     back to the upright position and settle there. The
+     translate(-50%,-50%) is preserved through every keyframe so the
+     check stays centred on the bubble body while rotating. */
   0%   { opacity: 0; transform: translate(-50%,-50%) scale(0)   rotate(0deg); }
   15%  { opacity: 1; transform: translate(-50%,-50%) scale(1)   rotate(360deg); }
   60%  {            transform: translate(-50%,-50%) scale(1)   rotate(1110deg); }
