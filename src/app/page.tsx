@@ -1299,13 +1299,13 @@ canvas { display: none; }
 }
 
 .splash-logo-row {
+  /* Container for the official brand wordmark PNG. Keeping the slide-in
+     animation so the transition from the icon phase feels continuous. */
   display: flex;
   align-items: center;
   gap: 0;
   opacity: 0;
   transform: translateX(-40px);
-  font-family: 'Syne', sans-serif;
-  font-style: italic;
   overflow: hidden;
 }
 .splash.phase2 .splash-logo-row {
@@ -1317,17 +1317,12 @@ canvas { display: none; }
 @keyframes logoFadeUp {
   to { opacity: 1; transform: translateY(0); }
 }
-.splash-text-zk {
-  font-weight: 800;
-  font-size: 44px;
-  color: #000;
-  position: relative;
-}
-.splash-text-truth {
-  font-weight: 900;
-  font-size: 44px;
-  color: #000;
-  position: relative;
+/* The wordmark is a pixel-perfect crop of the "zkTruth" text from the
+   user's own brand PNG — no font fallback, no hand-tuned weights. */
+.splash-wordmark {
+  height: 52px;
+  width: auto;
+  display: block;
 }
 
 .splash-sub {
@@ -2526,7 +2521,12 @@ export default function Home() {
             />
           </div>
           <div className="splash-logo-row">
-            <span className="splash-text-zk">zk</span><span className="splash-text-truth">Truth</span>
+            <img
+              className="splash-wordmark"
+              src="/splash-wordmark.png"
+              alt="zkTruth"
+              draggable={false}
+            />
           </div>
           <div className="splash-sub">Proof of Reality</div>
           <div className="splash-powered"><div className="splash-pw-dot" />POWERED BY WORLD CHAIN</div>
