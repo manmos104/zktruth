@@ -5,6 +5,7 @@ import { useAccount, useDisconnect } from 'wagmi';
 import { useMintVerifiedProof, useMintUnverifiedProof, toBytes32Hash, hashGps } from '@/lib/useZkTruth';
 import { ZKTRUTH_CONTRACT_ADDRESS } from '@/lib/contract';
 import { WorldIdVerifyButton } from '@/lib/worldid';
+import { useTelegramBackButton } from './hooks/useTelegramBackButton';
 
 
 const styles = `
@@ -2289,6 +2290,15 @@ export default function Home() {
     }
   }, []);
 
+  // Bind the native Telegram Mini App back button to `handleReset`
+  // whenever we're off the initial camera screen. Without this, the
+  // only affordance in the top-left of the Telegram header is the
+  // built-in Close (✕), which dismisses the entire Mini App instead
+  // of just returning to the capture view. Outside Telegram the hook
+  // silently does nothing and the in-page ✕ buttons remain the way
+  // out.
+  useTelegramBackButton(screen !== 'camera' && screen !== 'splash', handleReset);
+
   // Coordinator callbacks for the real IDKit-backed WorldIdVerifyButton.
   // The widget itself owns the modal + server-verify call; we just react to
   // state transitions to drive the rest of the mint flow.
@@ -2529,7 +2539,7 @@ export default function Home() {
             />
           </div>
           <div className="splash-sub">Proof of Reality</div>
-          <div className="splash-powered"><div className="splash-pw-dot" />POWERED BY WORLD CHAIN</div>
+          <div className="splash-powered"><div className="splash-pw-dot" />POWERED BY TON</div>
         </div>
 
         {screen === "camera" && (
