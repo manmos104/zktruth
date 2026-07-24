@@ -6,6 +6,7 @@ import { useMintVerifiedProof, useMintUnverifiedProof, toBytes32Hash, hashGps } 
 import { ZKTRUTH_CONTRACT_ADDRESS } from '@/lib/contract';
 import { WorldIdVerifyButton } from '@/lib/worldid';
 import { useTelegramBackButton } from './hooks/useTelegramBackButton';
+import { TonConnectButton } from '@tonconnect/ui-react';
 
 
 const styles = `
@@ -2703,7 +2704,7 @@ export default function Home() {
                   // omit them in that variant.
                   <>
                     <div className="wid-hash">{proofData.hash.slice(0,22)}...</div>
-                    <div className="wid-time">{proofData.timestamp.split('T')[1]?.split('.')[0]} UTC • World Chain</div>
+                    <div className="wid-time">{proofData.timestamp.split('T')[1]?.split('.')[0]} UTC • TON</div>
                   </>
                 )}
                 {(capturedImage || capturedVideoUrl) && (
@@ -2728,54 +2729,42 @@ export default function Home() {
                     {capturedVideoUrl ? '▶ REPLAY' : '🖼 VIEW'}
                   </button>
                 )}
-                <WorldIdVerifyButton
-                  signal={proofData?.hash ?? ''}
-                  verifying={worldIdVerifying}
-                  verified={worldIdVerified}
-                  onVerifying={handleWorldIdVerifying}
-                  onVerified={handleWorldIdVerified}
-                  onError={handleWorldIdError}
-                  className={(capturedImage || capturedVideoUrl) ? 'wid-verify-btn wid-verify-btn--light' : undefined}
-                />
-                {/* Verified-path mint shortcut. Only fires once the user
-                    has finished World ID verification — otherwise it's
-                    a visible-but-disabled affordance signalling the
-                    next step in the flow. */}
+                {/* Phase 2: World ID verification button has been retired.
+                    The zkTruth pivot to Telegram Mini App + TON drops the
+                    World ID gate entirely — humanity is inferred from the
+                    Telegram account (phone-number-verified by construction).
+                    The old <WorldIdVerifyButton /> and the wagmi/IDKit
+                    handlers it depended on are no longer rendered; their
+                    supporting code will be deleted in a follow-up commit
+                    once Phase 4 (TON Tact contract) lands. */}
+                {/* TON Connect entry point. When the user is not yet
+                    connected the button renders as "Connect Wallet";
+                    once connected it collapses into an address chip
+                    the user can tap to disconnect. The library ships
+                    its own modal that walks the user through picking
+                    Tonkeeper / MyTonWallet / Wallet in Telegram, so
+                    we don't need a custom picker. */}
+                <div style={{ display: 'flex', justifyContent: 'center', marginTop: 8 }}>
+                  <TonConnectButton />
+                </div>
+
+                {/* Placeholder mint button — routes into the existing
+                    confirm-tx flow but the actual chain call is stubbed
+                    until the TON contract is deployed. Once that's done,
+                    onPress will submit through TON Connect. */}
                 <button
                   type="button"
                   className="wid-verify-btn"
-                  disabled={!worldIdVerified}
                   onClick={() => { setMintMode('verified'); setScreen('confirm-tx'); }}
                   style={{
                     marginTop: 10,
-                    background: worldIdVerified
-                      ? 'linear-gradient(135deg, #00ff87, #00cc66)'
-                      : '#e8e8e8',
-                    color: worldIdVerified ? '#0a0a0a' : '#777',
-                    boxShadow: worldIdVerified
-                      ? '0 4px 18px rgba(0,200,100,0.32)'
-                      : 'none',
+                    background: 'linear-gradient(135deg, #00ff87, #00cc66)',
+                    color: '#0a0a0a',
+                    boxShadow: '0 4px 18px rgba(0,200,100,0.32)',
                   }}
                 >
-                  NFT MINT
+                  MINT ON TON
                 </button>
-                {worldIdError && (
-                  <div style={{
-                    marginTop: 8,
-                    padding: '8px 12px',
-                    background: (capturedImage || capturedVideoUrl) ? 'rgba(255,59,92,0.08)' : 'rgba(255,59,92,0.12)',
-                    border: '1px solid rgba(255,59,92,0.4)',
-                    borderRadius: 6,
-                    color: '#ff3b5c',
-                    fontFamily: 'Space Mono, monospace',
-                    fontSize: 11,
-                    lineHeight: 1.4,
-                    wordBreak: 'break-word',
-                  }}>
-                    <div style={{ opacity: 0.7, marginBottom: 2 }}>WORLD ID ERROR</div>
-                    <div>{worldIdError}</div>
-                  </div>
-                )}
                 {/* MINT :: PAY GAS removed — the NFT MINT button above
                     is now the single mint affordance, going active once
                     World ID verification completes. */}
