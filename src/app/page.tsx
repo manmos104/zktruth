@@ -209,10 +209,15 @@ canvas { display: none; }
   pointer-events: none;
 }
 .meta-line {
-  font-size: 10px;
+  font-size: 11px;
   color: var(--accent);
-  opacity: 0.6;
+  /* Was 0.6 — too faded to read against camera feed backgrounds,
+     the timestamp + GPS coords were mistaken for missing. Full
+     opacity plus a subtle text-shadow keeps them legible on both
+     bright and dark scenes. */
+  opacity: 1;
   letter-spacing: 0.5px;
+  text-shadow: 0 1px 3px rgba(0,0,0,0.7);
 }
 /* The network status line gets full opacity and a compact
    token-style layout — dots + glyph + label read as a mission-
