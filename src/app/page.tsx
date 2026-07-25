@@ -1187,10 +1187,6 @@ canvas { display: none; }
   gap: 20px;
 }
 .tx-icon {
-  /* Rebranded from a generic pump/fuel roundel to a TON-styled
-     diamond glyph. The soft blue radial gradient + inner glow give
-     it depth; the outer ring uses TON's brand blue to feel native
-     to the network the user is about to spend on. */
   width: 88px; height: 88px;
   border-radius: 24px;
   background:
@@ -1206,6 +1202,25 @@ canvas { display: none; }
   font-size: 42px;
   color: #0098ea;
   text-shadow: 0 0 20px rgba(0,152,234,0.8);
+}
+/* TON logo variant — the artwork is already a self-contained blue
+   rounded-square badge, so we strip the surrounding glow/border to
+   avoid stacking two visual containers. Slight drop-shadow keeps it
+   from looking flat against the dark page background. */
+.tx-icon--ton {
+  background: none;
+  border: none;
+  box-shadow: 0 8px 32px rgba(0,152,234,0.35);
+  padding: 0;
+  width: 88px;
+  height: 88px;
+  border-radius: 20px;
+  overflow: hidden;
+}
+.tx-icon--ton img {
+  width: 100%;
+  height: 100%;
+  display: block;
 }
 .tx-title {
   font-family: 'Syne', sans-serif;
@@ -3021,30 +3036,17 @@ export default function Home() {
                   verify screen instead of the camera. */}
             </div>
             <div className="confirm-tx-body">
-              {/* TON diamond glyph rendered as inline SVG so the strokes
-                  and gradients survive font rendering quirks that would
-                  mangle the ◆ character across Telegram in-app browsers.
-                  Two-tone facets suggest depth and read as the network's
-                  brand mark rather than a generic geometry symbol. */}
-              <div className="tx-icon">
-                <svg viewBox="0 0 56 56" width="56" height="56" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
-                  <defs>
-                    <linearGradient id="tonDiamondL" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="0" stopColor="#3ab7ff" />
-                      <stop offset="1" stopColor="#0088cc" />
-                    </linearGradient>
-                    <linearGradient id="tonDiamondR" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="0" stopColor="#0098ea" />
-                      <stop offset="1" stopColor="#005f8f" />
-                    </linearGradient>
-                  </defs>
-                  {/* Left facet */}
-                  <path d="M28 6 L6 20 L28 50 Z" fill="url(#tonDiamondL)" />
-                  {/* Right facet — slightly darker for pseudo-3D depth */}
-                  <path d="M28 6 L50 20 L28 50 Z" fill="url(#tonDiamondR)" />
-                  {/* Top horizontal highlight */}
-                  <path d="M28 6 L50 20 L6 20 Z" fill="#fff" fillOpacity="0.14" />
-                </svg>
+              {/* Official TON logo — pixel-perfect crop of the user's
+                  reference image (a light-blue rounded square with the
+                  stylized T mark). Using a PNG keeps the mark exactly
+                  as the network's design system defines it instead of
+                  approximating it in code. */}
+              <div className="tx-icon tx-icon--ton">
+                <img
+                  src="/ton-logo.png"
+                  alt="TON"
+                  draggable={false}
+                />
               </div>
               <div className="tx-title">SIGN TO MINT</div>
               <div className="tx-desc">Confirm the transaction in your Gram wallet to stamp this capture as a Proof of Capture on chain.</div>
