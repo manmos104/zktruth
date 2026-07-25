@@ -450,7 +450,10 @@ canvas { display: none; }
 }
 .overlay-screen > * { position: relative; z-index: 1; }
 .overlay-header {
-  padding: 44px 20px 12px;
+  /* 88px top padding matches the camera top-bar — it leaves room
+     for Telegram's back arrow / drag handle inside a Mini App so
+     the logo doesn't collide with the system chrome. */
+  padding: 88px 20px 12px;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -1184,14 +1187,25 @@ canvas { display: none; }
   gap: 20px;
 }
 .tx-icon {
-  width: 72px; height: 72px;
-  border-radius: 50%;
-  background: rgba(0,200,255,0.06);
-  border: 2px solid rgba(0,200,255,0.2);
+  /* Rebranded from a generic pump/fuel roundel to a TON-styled
+     diamond glyph. The soft blue radial gradient + inner glow give
+     it depth; the outer ring uses TON's brand blue to feel native
+     to the network the user is about to spend on. */
+  width: 88px; height: 88px;
+  border-radius: 24px;
+  background:
+    radial-gradient(circle at 30% 30%, rgba(0,152,234,0.35), rgba(0,152,234,0.08) 60%, transparent 100%),
+    linear-gradient(135deg, rgba(0,152,234,0.12), rgba(0,152,234,0.02));
+  border: 1px solid rgba(0,152,234,0.4);
+  box-shadow:
+    0 0 40px rgba(0,152,234,0.25),
+    inset 0 1px 0 rgba(255,255,255,0.12);
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 28px;
+  font-size: 42px;
+  color: #0098ea;
+  text-shadow: 0 0 20px rgba(0,152,234,0.8);
 }
 .tx-title {
   font-family: 'Syne', sans-serif;
@@ -1601,7 +1615,10 @@ export default function Home() {
   const [gpsCoords, setGpsCoords] = useState<string>("Acquiring GPS…");
   const [gpsLocation, setGpsLocation] = useState<string>("");
 
-  const WLD_GAS_FEE = "0.05 WLD";
+  // TON gas fee — TON's transaction cost is orders of magnitude
+  // lower than EVM gas. This is a placeholder until the Tact
+  // contract is deployed and we can compute the real fee estimate.
+  const TON_GAS_FEE = "0.01 TON";
 
   // Smart contract hooks
   // Cast to string so TS doesn't narrow the literal type and complain that the
@@ -2984,33 +3001,33 @@ export default function Home() {
               <button className="btn-back" onClick={() => setScreen("worldid")}>BACK</button>
             </div>
             <div className="confirm-tx-body">
-              <div className="tx-icon">⛽</div>
-              <div className="tx-title">GAS FEE REQUIRED</div>
-              <div className="tx-desc">Without World ID verification, a WLD gas fee is required to mint your proof on-chain.</div>
+              {/* Diamond glyph replaces the fuel-pump emoji — this is
+                  TON's brand cue and reads as "on-chain action" more
+                  cleanly than a gas icon on a chain with sub-cent
+                  fees. */}
+              <div className="tx-icon">◆</div>
+              <div className="tx-title">SIGN TO MINT</div>
+              <div className="tx-desc">Confirm the transaction in your TON wallet to stamp this capture as a Proof of Capture on chain.</div>
               <div className="tx-details">
                 <div className="tx-detail-row">
                   <span className="tx-detail-key">NETWORK</span>
-                  <span className="tx-detail-value">World Chain</span>
+                  <span className="tx-detail-value">TON L1 · Mainnet</span>
                 </div>
                 <div className="tx-detail-row">
                   <span className="tx-detail-key">ACTION</span>
                   <span className="tx-detail-value">MINT :: PROOF NFT</span>
                 </div>
                 <div className="tx-detail-row">
-                  <span className="tx-detail-key">GAS FEE</span>
-                  <span className="tx-detail-value highlight">{WLD_GAS_FEE}</span>
+                  <span className="tx-detail-key">FEE</span>
+                  <span className="tx-detail-value highlight">~ {TON_GAS_FEE}</span>
                 </div>
                 <div className="tx-detail-row">
                   <span className="tx-detail-key">WALLET</span>
-                  <span className="tx-detail-value">{address ? address.slice(0,6) + '...' + address.slice(-4) : 'Not connected'}</span>
-                </div>
-                <div className="tx-detail-row">
-                  <span className="tx-detail-key">BALANCE</span>
-                  <span className="tx-detail-value">-- WLD</span>
+                  <span className="tx-detail-value">{shortTonAddr ?? 'Not connected'}</span>
                 </div>
               </div>
-              <div className="tx-warning">Verified users (World ID) mint for free. Gas fee only applies to unverified captures.</div>
-              <button className="btn-confirm-tx" onClick={handleConfirmTx}>CONFIRM :: PAY {WLD_GAS_FEE}</button>
+              <div className="tx-warning">TON gas fees are typically fractions of a cent. Your wallet will display the exact amount before signing.</div>
+              <button className="btn-confirm-tx" onClick={handleConfirmTx}>SIGN &amp; MINT · {TON_GAS_FEE}</button>
               <button className="btn-cancel-tx" onClick={() => setScreen("worldid")}>CANCEL</button>
             </div>
           </div>
