@@ -2370,7 +2370,24 @@ export default function Home() {
   // of just returning to the capture view. Outside Telegram the hook
   // silently does nothing and the in-page ✕ buttons remain the way
   // out.
-  useTelegramBackButton(screen !== 'camera' && screen !== 'splash', handleReset);
+  // Telegram back button behaviour depends on what's on top:
+  //  1. Replay modal open → close the modal only (don't lose the
+  //     verify screen the user was on).
+  //  2. Otherwise on any non-camera screen → full reset back to
+  //     camera capture.
+  // A single hook subscribes to whichever handler is currently
+  // appropriate so the two behaviours never race.
+  const handleTelegramBack = useCallback(() => {
+    if (replayOpen) {
+      setReplayOpen(false);
+      return;
+    }
+    handleReset();
+  }, [replayOpen, handleReset]);
+  useTelegramBackButton(
+    screen !== 'camera' && screen !== 'splash',
+    handleTelegramBack,
+  );
 
   // TON Connect state. `tonWallet` is null when no wallet is connected,
   // otherwise an object with `account.address` (raw hex form). We drive
