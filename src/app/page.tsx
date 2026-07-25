@@ -116,7 +116,11 @@ canvas { display: none; }
   right: 0;
   bottom: auto;
   height: auto;
-  padding: max(44px, env(safe-area-inset-top, 44px)) 20px 16px;
+  /* Extra top padding leaves room for Telegram's own header (Close
+     button + drag handle) when the app runs as a Mini App. In a
+     regular browser the extra space just becomes a slight visual
+     breathing area above the logo — acceptable trade. */
+  padding: max(88px, env(safe-area-inset-top, 44px)) 20px 16px;
   background: linear-gradient(to bottom, rgba(0,0,0,0.7) 0%, transparent 100%);
   display: flex;
   align-items: center;
@@ -174,7 +178,11 @@ canvas { display: none; }
 
 .meta-overlay {
   position: absolute;
-  top: 90px;
+  /* Sits below the top-bar (which itself has 88px top-padding to
+     clear Telegram's Close/drag handle). Bumped from 90px so the
+     time/GPS lines don't overlap the Telegram header inside a Mini
+     App. */
+  top: 140px;
   left: 20px;
   bottom: auto;
   right: auto;
@@ -2567,7 +2575,7 @@ export default function Home() {
             <div className="meta-overlay">
               <div className="meta-line">⏱ {now.replace('T',' ').split('.')[0]} UTC</div>
               <div className="meta-line">📍 {gpsCoords}</div>
-              <div className="meta-line">⛓ WORLD CHAIN READY</div>
+              <div className="meta-line">⛓ TON READY</div>
             </div>
 
             <div className="top-bar">
@@ -2763,6 +2771,7 @@ export default function Home() {
                   style={{
                     marginTop: 10,
                     background: '#0098ea',
+                    backgroundImage: 'none',
                     color: '#fff',
                     boxShadow: '0 4px 18px rgba(0,152,234,0.32)',
                   }}
@@ -2774,16 +2783,19 @@ export default function Home() {
                     confirm-tx flow but the actual chain call is stubbed
                     until the TON contract is deployed. Once that's done,
                     onPress will submit through TON Connect. Rendered
-                    in a neutral grey to signal "next step, not the
-                    active action" until the user connects a wallet. */}
+                    in a neutral grey — `backgroundImage: none` is
+                    required because `.wid-verify-btn` defaults to a
+                    linear-gradient which would otherwise mask the flat
+                    grey we want here. */}
                 <button
                   type="button"
                   className="wid-verify-btn"
                   onClick={() => { setMintMode('verified'); setScreen('confirm-tx'); }}
                   style={{
                     marginTop: 10,
-                    background: '#e8e8e8',
-                    color: '#777',
+                    background: '#a8a8a8',
+                    backgroundImage: 'none',
+                    color: '#fff',
                     boxShadow: 'none',
                   }}
                 >
