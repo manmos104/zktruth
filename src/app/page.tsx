@@ -167,6 +167,21 @@ canvas { display: none; }
   50% { opacity: 0; }
 }
 
+/* Modifier for the TON-branded network status pill. Overrides the
+   legacy cyan (World Chain) colours with a subtle green + neon-blue
+   diamond glyph so the same DOM structure just re-skins cleanly. */
+.chain-badge--ton {
+  color: #d8ffe9;
+  border-color: rgba(0, 255, 135, 0.28);
+  background: rgba(0, 255, 135, 0.06);
+  backdrop-filter: blur(6px);
+  font-family: 'Space Mono', monospace;
+  font-weight: 700;
+  letter-spacing: 1px;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
 .chain-badge {
   font-size: 9px;
   color: var(--accent2);
@@ -2619,19 +2634,6 @@ export default function Home() {
             <div className="meta-overlay">
               <div className="meta-line">⏱ {now.replace('T',' ').split('.')[0]} UTC</div>
               <div className="meta-line">📍 {gpsCoords}</div>
-              {/* Elevated network status line. Green pulsing dot to
-                  communicate "live connection" + diamond glyph (TON's
-                  brand cue) + tech-y :: separator make this line read
-                  as a status readout rather than boilerplate. */}
-              <div className="meta-line meta-network">
-                <span className="net-dot" />
-                <span className="net-glyph">◆</span>
-                <span className="net-label">TON&nbsp;L1</span>
-                <span className="net-sep">::</span>
-                <span className="net-state">MAINNET</span>
-                <span className="net-sep">·</span>
-                <span className="net-state net-state--live">LIVE</span>
-              </div>
             </div>
 
             <div className="top-bar">
@@ -2643,7 +2645,16 @@ export default function Home() {
                 <div className="logo-text"><span className="logo-zk">zk</span><span className="logo-truth">Truth</span></div>
                 <div className="live-badge"><div className="live-dot" />{recording ? `REC ${formatTime(recordingTime)}` : 'LIVE'}</div>
               </div>
-              <div className="chain-badge">WORLD CHAIN</div>
+              {/* Top-right network status. Diamond glyph is TON's
+                  brand cue, blue neon shadow gives it depth, monospace
+                  + :: separator reads as a technical readout. No LIVE
+                  suffix per user preference. */}
+              <div className="chain-badge chain-badge--ton">
+                <span className="net-glyph">◆</span>
+                <span className="net-label">TON&nbsp;L1</span>
+                <span className="net-sep">::</span>
+                <span className="net-state">MAINNET</span>
+              </div>
             </div>
             {recordDebug && (
               <div style={{
