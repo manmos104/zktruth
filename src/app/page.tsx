@@ -2688,12 +2688,10 @@ export default function Home() {
                 <button className="side-btn" onClick={flipCamera}><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{width:22,height:22}}><path d="M1 4v6h6"/><path d="M23 20v-6h-6"/><path d="M20.49 9A9 9 0 0 0 5.64 5.64L1 10m22 4-4.64 4.36A9 9 0 0 1 3.51 15"/></svg></button>
                 <div className="side-btn-label">FLIP</div>
               </div>
-              <div>
-                <button className="side-btn" onClick={isConnected ? () => disconnect() : openConnectModal}>
-                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{width:22,height:22}}><rect x="2" y="5" width="20" height="14" rx="3"/><circle cx="17" cy="12" r="1" fill="currentColor" stroke="none"/><path d="M2 9h20"/></svg>
-                </button>
-                <div className="side-btn-label">{isConnected ? (address?.slice(0,4) + '..' + address?.slice(-3)) : 'WALLET'}</div>
-              </div>
+              {/* Camera-screen WALLET shortcut removed. Wallet
+                  connection is now handled by the CONNECT WALLET
+                  button on the verify screen post-capture, keeping
+                  the camera HUD focused on capture-only affordances. */}
             </div>
 
             <div className="bottom-controls">
