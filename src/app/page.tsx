@@ -199,6 +199,50 @@ canvas { display: none; }
   opacity: 0.6;
   letter-spacing: 0.5px;
 }
+/* The network status line gets full opacity and a compact
+   token-style layout — dots + glyph + label read as a mission-
+   control readout rather than a generic subtitle. */
+.meta-network {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  opacity: 1;
+  padding: 3px 8px 3px 6px;
+  border-radius: 999px;
+  background: rgba(0, 255, 135, 0.06);
+  border: 1px solid rgba(0, 255, 135, 0.28);
+  backdrop-filter: blur(6px);
+  font-family: 'Space Mono', monospace;
+  font-weight: 700;
+  font-size: 9px;
+  letter-spacing: 1px;
+  color: #d8ffe9;
+  width: fit-content;
+}
+.net-dot {
+  width: 6px; height: 6px;
+  border-radius: 50%;
+  background: #00ff87;
+  box-shadow: 0 0 8px #00ff87, 0 0 2px #fff inset;
+  animation: netPulse 1.6s ease-in-out infinite;
+}
+.net-glyph {
+  color: #0098ea;
+  font-size: 11px;
+  line-height: 1;
+  text-shadow: 0 0 6px rgba(0, 152, 234, 0.6);
+}
+.net-label { color: #ffffff; }
+.net-sep {
+  color: rgba(255, 255, 255, 0.45);
+  font-weight: 400;
+}
+.net-state { color: rgba(255, 255, 255, 0.85); }
+.net-state--live { color: #00ff87; }
+@keyframes netPulse {
+  0%, 100% { opacity: 0.55; transform: scale(0.9); }
+  50%      { opacity: 1;    transform: scale(1.15); }
+}
 
 .side-buttons {
   position: absolute;
@@ -2575,7 +2619,19 @@ export default function Home() {
             <div className="meta-overlay">
               <div className="meta-line">⏱ {now.replace('T',' ').split('.')[0]} UTC</div>
               <div className="meta-line">📍 {gpsCoords}</div>
-              <div className="meta-line">⛓ TON READY</div>
+              {/* Elevated network status line. Green pulsing dot to
+                  communicate "live connection" + diamond glyph (TON's
+                  brand cue) + tech-y :: separator make this line read
+                  as a status readout rather than boilerplate. */}
+              <div className="meta-line meta-network">
+                <span className="net-dot" />
+                <span className="net-glyph">◆</span>
+                <span className="net-label">TON&nbsp;L1</span>
+                <span className="net-sep">::</span>
+                <span className="net-state">MAINNET</span>
+                <span className="net-sep">·</span>
+                <span className="net-state net-state--live">LIVE</span>
+              </div>
             </div>
 
             <div className="top-bar">
