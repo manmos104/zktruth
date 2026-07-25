@@ -1615,10 +1615,11 @@ export default function Home() {
   const [gpsCoords, setGpsCoords] = useState<string>("Acquiring GPS…");
   const [gpsLocation, setGpsLocation] = useState<string>("");
 
-  // TON gas fee — TON's transaction cost is orders of magnitude
-  // lower than EVM gas. This is a placeholder until the Tact
-  // contract is deployed and we can compute the real fee estimate.
-  const TON_GAS_FEE = "0.01 TON";
+  // Gas fee shown as Gram (per Durov's Gram wallet rebrand) — the
+  // chain itself is still TON L1, but the native currency label
+  // surfaced to users is "Gram". Placeholder until the Tact contract
+  // is deployed and we can compute the real fee estimate.
+  const TON_GAS_FEE = "0.01 Gram";
 
   // Smart contract hooks
   // Cast to string so TS doesn't narrow the literal type and complain that the
@@ -2387,20 +2388,35 @@ export default function Home() {
   // of just returning to the capture view. Outside Telegram the hook
   // silently does nothing and the in-page ✕ buttons remain the way
   // out.
-  // Telegram back button behaviour depends on what's on top:
-  //  1. Replay modal open → close the modal only (don't lose the
-  //     verify screen the user was on).
-  //  2. Otherwise on any non-camera screen → full reset back to
-  //     camera capture.
-  // A single hook subscribes to whichever handler is currently
-  // appropriate so the two behaviours never race.
+  // Telegram back button behaviour is context-aware so each tap
+  // pops just one level of the flow rather than resetting the
+  // entire session. Priority order:
+  //  1. Replay modal open → close the modal only.
+  //  2. On the confirm-tx (SIGN TO MINT) screen → return to the
+  //     verify screen the user came from.
+  //  3. On the sns-share screen → return to the underlying share
+  //     screen (or minting screen depending on where we came from).
+  //  4. On the standalone share screen → back to verify.
+  //  5. Otherwise (verify / minting) → full reset to camera.
   const handleTelegramBack = useCallback(() => {
     if (replayOpen) {
       setReplayOpen(false);
       return;
     }
+    if (screen === 'confirm-tx') {
+      setScreen('worldid');
+      return;
+    }
+    if (screen === 'sns-share') {
+      setScreen(snsFromScreen || 'share');
+      return;
+    }
+    if (screen === 'share') {
+      setScreen('worldid');
+      return;
+    }
     handleReset();
-  }, [replayOpen, handleReset]);
+  }, [replayOpen, screen, snsFromScreen, handleReset]);
   useTelegramBackButton(
     screen !== 'camera' && screen !== 'splash',
     handleTelegramBack,
@@ -2998,16 +3014,40 @@ export default function Home() {
                 <div className="logo-text"><span className="logo-zk">zk</span><span className="logo-truth">Truth</span></div>
                 <div className="live-badge"><div className="live-dot" />LIVE</div>
               </div>
-              <button className="btn-back" onClick={() => setScreen("worldid")}>BACK</button>
+              {/* The in-page BACK button was removed to avoid a
+                  duplicate affordance next to Telegram's own back
+                  arrow in the Mini App header. See useTelegramBackButton
+                  wiring — the system arrow now routes back to the
+                  verify screen instead of the camera. */}
             </div>
             <div className="confirm-tx-body">
-              {/* Diamond glyph replaces the fuel-pump emoji — this is
-                  TON's brand cue and reads as "on-chain action" more
-                  cleanly than a gas icon on a chain with sub-cent
-                  fees. */}
-              <div className="tx-icon">◆</div>
+              {/* TON diamond glyph rendered as inline SVG so the strokes
+                  and gradients survive font rendering quirks that would
+                  mangle the ◆ character across Telegram in-app browsers.
+                  Two-tone facets suggest depth and read as the network's
+                  brand mark rather than a generic geometry symbol. */}
+              <div className="tx-icon">
+                <svg viewBox="0 0 56 56" width="56" height="56" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+                  <defs>
+                    <linearGradient id="tonDiamondL" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="0" stopColor="#3ab7ff" />
+                      <stop offset="1" stopColor="#0088cc" />
+                    </linearGradient>
+                    <linearGradient id="tonDiamondR" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="0" stopColor="#0098ea" />
+                      <stop offset="1" stopColor="#005f8f" />
+                    </linearGradient>
+                  </defs>
+                  {/* Left facet */}
+                  <path d="M28 6 L6 20 L28 50 Z" fill="url(#tonDiamondL)" />
+                  {/* Right facet — slightly darker for pseudo-3D depth */}
+                  <path d="M28 6 L50 20 L28 50 Z" fill="url(#tonDiamondR)" />
+                  {/* Top horizontal highlight */}
+                  <path d="M28 6 L50 20 L6 20 Z" fill="#fff" fillOpacity="0.14" />
+                </svg>
+              </div>
               <div className="tx-title">SIGN TO MINT</div>
-              <div className="tx-desc">Confirm the transaction in your TON wallet to stamp this capture as a Proof of Capture on chain.</div>
+              <div className="tx-desc">Confirm the transaction in your Gram wallet to stamp this capture as a Proof of Capture on chain.</div>
               <div className="tx-details">
                 <div className="tx-detail-row">
                   <span className="tx-detail-key">NETWORK</span>
@@ -3026,7 +3066,7 @@ export default function Home() {
                   <span className="tx-detail-value">{shortTonAddr ?? 'Not connected'}</span>
                 </div>
               </div>
-              <div className="tx-warning">TON gas fees are typically fractions of a cent. Your wallet will display the exact amount before signing.</div>
+              <div className="tx-warning">Gram fees on TON are typically fractions of a cent. Your wallet will display the exact amount before signing.</div>
               <button className="btn-confirm-tx" onClick={handleConfirmTx}>SIGN &amp; MINT · {TON_GAS_FEE}</button>
               <button className="btn-cancel-tx" onClick={() => setScreen("worldid")}>CANCEL</button>
             </div>
