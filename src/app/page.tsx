@@ -2502,126 +2502,87 @@ export default function Home() {
   }, [proofData, gpsLocation]);
 
   const handleShareWithImage = useCallback(async () => {
-    // Build the tweet body: rich metadata WITHOUT any URL. iOS X app
-    // silently swaps a file share for a URL card when text contains a
-    // URL; keeping the payload URL-free is only half the fix.
+    // Post the capture to the public zkTruth Telegram channel via our
+    // Bot API relay. This is the new "canonical share" path — the
+    // Telegram post itself becomes the shareable proof URL, and the
+    // media lives on Telegram's CDN so we don't pay for storage or
+    // bandwidth. No more iOS Web Share juggling, no X compose quirks.
     //
-    // The other half — and the root cause we hit on the previous
-    // deploy — is that combined `{text, files}` payloads are still
-    // interpreted by iOS's system share handler as "text-first" for
-    // some targets. When the share is routed to X that way, the file
-    // is dropped and only the text lands in the composer. There's no
-    // way to force X's iOS app to accept both; picking one is
-    // required. We pick the file. Metadata text goes to the clipboard
-    // so the user can paste it into the composer after the image is
-    // attached.
-    const proofUrl = buildProofUrl();
-    const hashLine = proofData?.hash
-      ? `Hash: ${proofData.hash.slice(0, 12)}...${proofData.hash.slice(-6)}`
-      : '';
-    const timeLine = proofData?.timestamp
-      ? `Time: ${proofData.timestamp}`
-      : '';
-    const locationLine = gpsLocation
-      ? `Location: ${gpsLocation}`
-      : gpsCoords && !gpsCoords.startsWith('Acquiring')
-        ? `Location: ${gpsCoords}`
-        : '';
-    const shareText = [
-      '✓ Verified Proof of Capture via zkTruth',
-      '',
-      hashLine,
-      timeLine,
-      locationLine,
-    ].filter(Boolean).join('\n');
+    // The old X/Twitter share-sheet dance (canShare + files + text)
+    // was removed on 2026-07-25 as part of the TON pivot. If the user
+    // wants to cross-post to X after the fact they can grab the
+    // Telegram post URL from the toast and paste it into their tweet.
 
-    // Build the file object (image or video) from the in-memory
-    // capture. Everything stays client-side — no upload, no storage
-    // cost.
-    let file: File | null = null;
+    let mediaBlob: Blob | null = null
+    let mediaName = 'capture.jpg'
     if (capturedVideo) {
-      const ext = capturedVideo.type.includes('mp4') ? 'mp4' : 'webm';
-      file = new File([capturedVideo], `zktruth-proof.${ext}`, { type: capturedVideo.type });
+      mediaBlob = capturedVideo
+      const ext = capturedVideo.type.includes('mp4') ? 'mp4' : 'webm'
+      mediaName = `zktruth-proof.${ext}`
     } else if (capturedImage) {
-      const parts = capturedImage.split(',');
-      const mime = parts[0].match(/:(.*?);/)?.[1] || 'image/jpeg';
-      const bstr = atob(parts[1]);
-      const arr = new Uint8Array(bstr.length);
-      for (let i = 0; i < bstr.length; i++) arr[i] = bstr.charCodeAt(i);
-      const blob = new Blob([arr], { type: mime });
-      file = new File([blob], 'zktruth-proof.jpg', { type: mime });
+      const parts = capturedImage.split(',')
+      const mime = parts[0].match(/:(.*?);/)?.[1] || 'image/jpeg'
+      const bstr = atob(parts[1])
+      const arr = new Uint8Array(bstr.length)
+      for (let i = 0; i < bstr.length; i++) arr[i] = bstr.charCodeAt(i)
+      mediaBlob = new Blob([arr], { type: mime })
+      mediaName = 'zktruth-proof.jpg'
     }
 
-    // Copy metadata text to the clipboard as a safety net inside the
-    // same user gesture — if the share payload somehow loses the text
-    // field (older iOS versions, non-X targets), the user can still
-    // paste. Best-effort; ignore permission errors.
+    if (!mediaBlob) {
+      setShareStatus('メディアが見つかりません')
+      setTimeout(() => setShareStatus(''), 3000)
+      return
+    }
+
+    setShareStatus('チャンネルへ投稿中...')
+
+    const metadata = {
+      hash: proofData?.hash,
+      timestamp: proofData?.timestamp,
+      gps: gpsLocation || (gpsCoords && !gpsCoords.startsWith('Acquiring') ? gpsCoords : undefined),
+      wallet: tonWallet?.account.address,
+      comment: captureComment?.trim() || undefined,
+    }
+
+    const form = new FormData()
+    form.set('media', mediaBlob, mediaName)
+    form.set('metadata', JSON.stringify(metadata))
+
     try {
-      await navigator.clipboard.writeText(shareText);
-    } catch { /* ignore */ }
-
-    // Primary path: Web Share with BOTH files and text. The text field
-    // has no URL substring, which is the trigger that used to make
-    // X's iOS app swap the file share for a URL-card share. With just
-    // metadata (Hash / Time / Location), X treats it as a normal media
-    // + text compose and pre-fills the tweet body while attaching the
-    // image. If canShare rejects the combined payload we fall back to
-    // file-only (image still attaches, user pastes from clipboard).
-    if (typeof navigator.share === 'function' && file) {
-      const combined: ShareData = { text: shareText, files: [file] };
-      const canShareCombined =
-        typeof navigator.canShare !== 'function' || navigator.canShare(combined);
-      if (canShareCombined) {
-        try {
-          await navigator.share(combined);
-          setShareStatus("画像＋本文をXに送信済み");
-          setTimeout(() => setShareStatus(""), 4000);
-          return;
-        } catch (e) {
-          if ((e as Error)?.name === 'AbortError') return;
-          // Some iOS versions throw NotAllowedError for combined
-          // payloads even when canShare said yes — retry file-only.
-        }
+      const res = await fetch('/api/telegram/post', { method: 'POST', body: form })
+      const data = (await res.json().catch(() => ({}))) as {
+        ok?: boolean
+        post_url?: string
+        error?: string
+        detail?: string
       }
-      // Combined path unavailable / rejected — file-only + clipboard.
-      const fileOnly: ShareData = { files: [file] };
-      const canShareFile =
-        typeof navigator.canShare !== 'function' || navigator.canShare(fileOnly);
-      if (canShareFile) {
-        try {
-          await navigator.share(fileOnly);
-          setShareStatus("画像を共有。Xで長押しペーストで本文貼付");
-          setTimeout(() => setShareStatus(""), 5000);
-          return;
-        } catch (e) {
-          if ((e as Error)?.name === 'AbortError') return;
-          // Any other error: fall through to download fallback.
-        }
+      if (!res.ok || !data.ok) {
+        const msg = data.detail || data.error || `投稿失敗 (${res.status})`
+        setShareStatus(`失敗: ${msg}`)
+        setTimeout(() => setShareStatus(''), 6000)
+        return
       }
+      setShareStatus('投稿完了! チャンネルを開きます...')
+      setTimeout(() => setShareStatus(''), 4000)
+      if (data.post_url) {
+        // Open the resulting Telegram post so the user can verify it
+        // landed correctly and grab the URL to cross-post if they want.
+        window.open(data.post_url, '_blank')
+      }
+    } catch (e) {
+      setShareStatus(`ネットワークエラー: ${(e as Error).message}`)
+      setTimeout(() => setShareStatus(''), 6000)
     }
-
-    // Fallback: no Web Share, no file, or canShare said no. Download
-    // the media so the user has it locally to attach manually, then
-    // open X compose in a new tab. Including the URL in the fallback
-    // text is fine here — it's the "no image" degraded path and the
-    // URL card is at least something.
-    if (file) {
-      const a = document.createElement('a');
-      const url = URL.createObjectURL(file);
-      a.href = url;
-      a.download = file.name;
-      a.click();
-      setTimeout(() => URL.revokeObjectURL(url), 1000);
-    }
-    const fallbackText = `${shareText}\n\n${proofUrl}`;
-    try { await navigator.clipboard.writeText(fallbackText); } catch { /* ignore */ }
-    window.open(
-      `https://x.com/intent/tweet?text=${encodeURIComponent(fallbackText)}`,
-      '_blank',
-    );
-    setShareStatus("画像をダウンロード。Xで手動添付してください");
-    setTimeout(() => setShareStatus(""), 6000);
-  }, [capturedImage, capturedVideo, buildProofUrl, proofData, gpsLocation, gpsCoords]);
+  }, [
+    capturedImage,
+    capturedVideo,
+    proofData,
+    gpsLocation,
+    gpsCoords,
+    tonWallet,
+    captureComment,
+  ]);
 
   const handleCopyLink = useCallback(() => {
     const url = buildProofUrl();
