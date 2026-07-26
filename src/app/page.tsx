@@ -3132,24 +3132,28 @@ export default function Home() {
                 <div className="wid-badge">SHARE PROOF</div>
               </div>
               <div className="wid-bottom">
-                {/* POST TO X now routes through the same Web Share path
-                    as the SHARE button up on the wid-share screen. We
-                    pass the file to the iOS share sheet so X's compose
-                    opens with the actual captured media attached
-                    (which is what the user asked for) instead of the
-                    old `x.com/intent/tweet?url=` route that always
-                    swapped the media for an OG card. */}
-                <button className="wid-verify-btn" onClick={handleShareWithImage}>
-                  POST TO X
-                </button>
-                <button className="wid-gas-btn" onClick={() => { const url = buildProofUrl(); window.open(`https://warpcast.com/~/compose?text=${encodeURIComponent('Verified proof of capture via zkTruth\n\n' + url)}&embeds[]=${encodeURIComponent(url)}`, '_blank'); }}>
-                  <span style={{fontSize:16}}>🟣</span> FARCASTER
+                {/* Telegram-only share flow. The primary action posts
+                    the capture into the public zkTruth channel via the
+                    Bot API; the secondary action copies the resulting
+                    channel URL so the user can paste it into X/other
+                    apps later if they want cross-posting. The old
+                    POST TO X + FARCASTER buttons were removed as part
+                    of the TON pivot — the channel post is now the
+                    canonical shareable proof URL. */}
+                <button
+                  className="wid-verify-btn"
+                  onClick={handleShareWithImage}
+                  style={{
+                    background: '#229ED9',
+                    backgroundImage: 'none',
+                    color: '#fff',
+                    boxShadow: '0 4px 18px rgba(34,158,217,0.32)',
+                  }}
+                >
+                  POST TO CHANNEL
                 </button>
                 <button className="wid-gas-btn" onClick={handleCopyLink}>
                   <span>🔗</span> COPY LINK
-                </button>
-                <button className="wid-gas-btn" onClick={handleShareWithImage}>
-                  <span>💾</span> SAVE / OTHER
                 </button>
                 <div className="sns-copy-status">{copyStatus}</div>
               </div>
