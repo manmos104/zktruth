@@ -1788,6 +1788,18 @@ export default function Home() {
   // camera side-panel so users can review what actually gets shared
   // (public channel, GPS, wallet, etc.) before they hit SHARE.
   const [privacyOpen, setPrivacyOpen] = useState(false);
+  // Blur-brush editor state used inside the replay modal. When
+  // blurMode is on, drag gestures on the canvas paint blurred
+  // circles over the underlying image (drawn by copying pixels from
+  // a pre-blurred hidden canvas). blurDirty tracks whether the user
+  // has actually painted anything, so we only offer SAVE when there
+  // are changes to commit back to `capturedImage`.
+  const [blurMode, setBlurMode] = useState(false);
+  const [blurDirty, setBlurDirty] = useState(false);
+  const blurCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  const blurredSourceRef = useRef<HTMLCanvasElement | null>(null);
+  const blurOriginalRef = useRef<HTMLImageElement | null>(null);
+  const blurIsDrawingRef = useRef(false);
   // On-screen recorder diagnostics for debugging audio capture on devices
   // where we don't have access to a JS console (e.g., iPhone Safari).
   const [recordDebug, setRecordDebug] = useState<string>("");
@@ -2847,6 +2859,114 @@ export default function Home() {
     captureComment,
   ]);
 
+  // === Blur editor plumbing ===================================
+  // Whenever the replay modal opens over a photo, prime two canvases:
+  //  - the visible working canvas (blurCanvasRef)
+  //  - a hidden pre-blurred copy of the same image (blurredSourceRef)
+  // Painting is then just a matter of `clip → drawImage(hidden, 0, 0)`
+  // for each brush stroke — no per-frame CPU blur, no dependency on
+  // browsers that don't support `ctx.filter` (Safari-on-iOS did add
+  // support in v14, but caching the blur is nice regardless).
+  useEffect(() => {
+    if (!replayOpen || !capturedImage || capturedVideoUrl) return;
+    const img = new window.Image();
+    img.onload = () => {
+      blurOriginalRef.current = img;
+      const canvas = blurCanvasRef.current;
+      if (canvas) {
+        canvas.width = img.naturalWidth || img.width;
+        canvas.height = img.naturalHeight || img.height;
+        const ctx = canvas.getContext('2d');
+        ctx?.drawImage(img, 0, 0);
+      }
+      const blurred = document.createElement('canvas');
+      blurred.width = img.naturalWidth || img.width;
+      blurred.height = img.naturalHeight || img.height;
+      const bCtx = blurred.getContext('2d');
+      if (bCtx) {
+        bCtx.filter = 'blur(24px)';
+        bCtx.drawImage(img, 0, 0);
+      }
+      blurredSourceRef.current = blurred;
+      setBlurDirty(false);
+    };
+    img.src = capturedImage;
+    // Reset editor state each open so leaving-and-reopening starts
+    // fresh (no stale dirty flag or half-drawn strokes).
+    setBlurMode(false);
+    return () => {
+      blurOriginalRef.current = null;
+      blurredSourceRef.current = null;
+    };
+  }, [replayOpen, capturedImage, capturedVideoUrl]);
+
+  const paintBlurAt = useCallback((clientX: number, clientY: number) => {
+    const canvas = blurCanvasRef.current;
+    const blurred = blurredSourceRef.current;
+    if (!canvas || !blurred) return;
+    const rect = canvas.getBoundingClientRect();
+    const scaleX = canvas.width / rect.width;
+    const scaleY = canvas.height / rect.height;
+    const x = (clientX - rect.left) * scaleX;
+    const y = (clientY - rect.top) * scaleY;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+    // Brush size scales with image so it feels the same on portrait
+    // vs landscape captures.
+    const radius = Math.max(canvas.width, canvas.height) * 0.055;
+    ctx.save();
+    ctx.beginPath();
+    ctx.arc(x, y, radius, 0, Math.PI * 2);
+    ctx.clip();
+    ctx.drawImage(blurred, 0, 0);
+    ctx.restore();
+  }, []);
+
+  const handleBlurPointerDown = useCallback((e: React.PointerEvent<HTMLCanvasElement>) => {
+    if (!blurMode) return;
+    e.stopPropagation();
+    (e.target as HTMLElement).setPointerCapture(e.pointerId);
+    blurIsDrawingRef.current = true;
+    paintBlurAt(e.clientX, e.clientY);
+    setBlurDirty(true);
+  }, [blurMode, paintBlurAt]);
+
+  const handleBlurPointerMove = useCallback((e: React.PointerEvent<HTMLCanvasElement>) => {
+    if (!blurMode || !blurIsDrawingRef.current) return;
+    e.preventDefault();
+    e.stopPropagation();
+    paintBlurAt(e.clientX, e.clientY);
+  }, [blurMode, paintBlurAt]);
+
+  const handleBlurPointerUp = useCallback((e: React.PointerEvent<HTMLCanvasElement>) => {
+    if (!blurMode) return;
+    e.stopPropagation();
+    blurIsDrawingRef.current = false;
+  }, [blurMode]);
+
+  const handleBlurSave = useCallback(() => {
+    const canvas = blurCanvasRef.current;
+    if (!canvas) return;
+    // Commit the painted result back to `capturedImage` so downstream
+    // (share to Telegram, mint on TON) uses the redacted version.
+    const dataUrl = canvas.toDataURL('image/jpeg', 0.92);
+    setCapturedImage(dataUrl);
+    setBlurMode(false);
+    setBlurDirty(false);
+    setReplayOpen(false);
+  }, []);
+
+  const handleBlurReset = useCallback(() => {
+    const canvas = blurCanvasRef.current;
+    const img = blurOriginalRef.current;
+    if (!canvas || !img) return;
+    canvas.width = img.naturalWidth || img.width;
+    canvas.height = img.naturalHeight || img.height;
+    const ctx = canvas.getContext('2d');
+    ctx?.drawImage(img, 0, 0);
+    setBlurDirty(false);
+  }, []);
+
   const handleCopyLink = useCallback(() => {
     const url = buildProofUrl();
     const text = 'Verified proof of capture via zkTruth\n\n' + url;
@@ -3193,11 +3313,14 @@ export default function Home() {
               </div>
             )}
             {replayOpen && (capturedImage || capturedVideoUrl) && (
-              // Fullscreen in-app preview. Renders either the captured
-              // photo or the captured video (with audio + native
-              // controls) and dismisses back to the verify flow with
-              // the × button or a backdrop tap — no new tab, no lost
-              // back navigation.
+              // Fullscreen in-app preview. For photos this doubles as
+              // a lightweight blur editor: tap BLUR to enable brush
+              // mode, then finger-drag over faces/plates/etc. The
+              // brush paints from a pre-blurred hidden canvas so the
+              // result is a natural-looking gaussian-blur mask baked
+              // into the same JPEG that gets shared/minted.
+              // For videos we fall back to the plain <video> player —
+              // editing video frames is out of scope for the MVP.
               <div
                 style={{
                   position: 'absolute',
@@ -3208,7 +3331,10 @@ export default function Home() {
                   alignItems: 'center',
                   justifyContent: 'center',
                 }}
-                onClick={() => setReplayOpen(false)}
+                // Backdrop dismiss is disabled while the user is
+                // actively editing so accidental taps don't discard
+                // their work. They can still close via the × button.
+                onClick={() => { if (!blurMode) setReplayOpen(false); }}
               >
                 {capturedVideoUrl ? (
                   <video
@@ -3225,21 +3351,114 @@ export default function Home() {
                   />
                 ) : (
                   capturedImage && (
-                    <img
-                      src={capturedImage}
-                      alt="Captured"
+                    <canvas
+                      ref={blurCanvasRef}
+                      onClick={(e) => e.stopPropagation()}
+                      onPointerDown={handleBlurPointerDown}
+                      onPointerMove={handleBlurPointerMove}
+                      onPointerUp={handleBlurPointerUp}
+                      onPointerCancel={handleBlurPointerUp}
+                      onPointerLeave={handleBlurPointerUp}
                       style={{
                         maxWidth: '100%',
                         maxHeight: '100%',
                         objectFit: 'contain',
+                        // touchAction none while editing so the mobile
+                        // browser doesn't hijack the drag into a scroll
+                        // or pinch-zoom.
+                        touchAction: blurMode ? 'none' : 'auto',
+                        cursor: blurMode ? 'crosshair' : 'default',
+                        userSelect: 'none',
                       }}
-                      onClick={(e) => e.stopPropagation()}
                     />
                   )
                 )}
+
+                {/* Editor toolbar — only shown for photos (video edit
+                    is out of scope for MVP). Sits at the top-left so
+                    the top-right × doesn't clash. */}
+                {!capturedVideoUrl && capturedImage && (
+                  <div
+                    style={{
+                      position: 'absolute',
+                      top: 14,
+                      left: 14,
+                      display: 'flex',
+                      gap: 8,
+                      zIndex: 2,
+                    }}
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    <button
+                      type="button"
+                      onClick={() => setBlurMode((b) => !b)}
+                      style={{
+                        height: 44,
+                        padding: '0 16px',
+                        borderRadius: 22,
+                        border: 'none',
+                        background: blurMode ? '#00c864' : 'rgba(255,255,255,0.95)',
+                        color: blurMode ? '#000' : '#111',
+                        fontFamily: 'Space Mono, monospace',
+                        fontSize: 12,
+                        fontWeight: 800,
+                        letterSpacing: 1.5,
+                        cursor: 'pointer',
+                        boxShadow: '0 4px 18px rgba(0,0,0,0.4)',
+                      }}
+                    >
+                      {blurMode ? 'BLUR :: ON' : 'BLUR :: OFF'}
+                    </button>
+                    {blurDirty && (
+                      <>
+                        <button
+                          type="button"
+                          onClick={handleBlurReset}
+                          style={{
+                            height: 44,
+                            padding: '0 14px',
+                            borderRadius: 22,
+                            border: 'none',
+                            background: 'rgba(0,0,0,0.75)',
+                            color: '#fff',
+                            fontFamily: 'Space Mono, monospace',
+                            fontSize: 12,
+                            fontWeight: 800,
+                            letterSpacing: 1,
+                            cursor: 'pointer',
+                            boxShadow: '0 4px 18px rgba(0,0,0,0.4)',
+                          }}
+                        >
+                          RESET
+                        </button>
+                        <button
+                          type="button"
+                          onClick={handleBlurSave}
+                          style={{
+                            height: 44,
+                            padding: '0 16px',
+                            borderRadius: 22,
+                            border: 'none',
+                            background: '#111',
+                            color: '#fff',
+                            fontFamily: 'Space Mono, monospace',
+                            fontSize: 12,
+                            fontWeight: 800,
+                            letterSpacing: 1.5,
+                            cursor: 'pointer',
+                            boxShadow: '0 4px 18px rgba(0,0,0,0.4)',
+                          }}
+                        >
+                          SAVE
+                        </button>
+                      </>
+                    )}
+                  </div>
+                )}
+
                 <button
                   type="button"
-                  onClick={(e) => { e.stopPropagation(); setReplayOpen(false); }}
+                  onClick={(e) => { e.stopPropagation(); setReplayOpen(false); setBlurMode(false); }}
                   aria-label="Close preview"
                   style={{
                     position: 'absolute',
@@ -3256,6 +3475,7 @@ export default function Home() {
                     fontWeight: 700,
                     cursor: 'pointer',
                     boxShadow: '0 4px 18px rgba(0,0,0,0.4)',
+                    zIndex: 2,
                   }}
                 >
                   ✕
