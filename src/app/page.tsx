@@ -208,15 +208,15 @@ canvas { display: none; }
   z-index: 5;
   pointer-events: none;
 }
-/* Privacy notice modal — dark cinematic sheet that pops up over the
-   camera screen (or any screen) when the user taps the INFO button.
-   Backdrop closes on tap-outside; the sheet itself stops
-   propagation so users can freely scroll inside. */
+/* Privacy notice modal — flat black-and-white sheet. Deliberately
+   drops the blue accents used elsewhere so this reads as legal/
+   formal content rather than a marketing surface. Backdrop closes
+   on tap-outside; the sheet stops propagation so users can freely
+   scroll inside. */
 .privacy-modal-backdrop {
   position: fixed;
   inset: 0;
-  background: rgba(0, 8, 20, 0.85);
-  backdrop-filter: blur(10px);
+  background: rgba(0, 0, 0, 0.6);
   z-index: 10005;
   display: flex;
   align-items: center;
@@ -229,23 +229,22 @@ canvas { display: none; }
   to   { opacity: 1; }
 }
 .privacy-modal {
-  background: linear-gradient(180deg, #0b1220 0%, #060a15 100%);
-  border: 1px solid rgba(0, 152, 234, 0.35);
-  border-radius: 20px;
+  background: #ffffff;
+  border: 1px solid #000;
+  border-radius: 16px;
   padding: 28px 22px 22px;
-  max-width: 420px;
+  max-width: 440px;
   width: 100%;
-  max-height: 82vh;
+  max-height: 84vh;
   overflow-y: auto;
-  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.6), inset 0 1px 0 rgba(255,255,255,0.05);
   position: relative;
   font-family: 'Space Mono', monospace;
-  color: #d8ecff;
-  animation: privacyPop 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+  color: #111;
+  animation: privacyPop 0.25s ease-out;
 }
 @keyframes privacyPop {
-  from { opacity: 0; transform: translateY(20px) scale(0.96); }
-  to   { opacity: 1; transform: translateY(0) scale(1); }
+  from { opacity: 0; transform: translateY(12px); }
+  to   { opacity: 1; transform: translateY(0); }
 }
 .privacy-modal-close {
   position: absolute;
@@ -254,9 +253,9 @@ canvas { display: none; }
   width: 32px;
   height: 32px;
   border-radius: 50%;
-  border: 1px solid rgba(255,255,255,0.15);
-  background: rgba(255,255,255,0.05);
-  color: #fff;
+  border: 1px solid #111;
+  background: #fff;
+  color: #111;
   font-size: 14px;
   cursor: pointer;
   display: flex;
@@ -268,15 +267,17 @@ canvas { display: none; }
   font-weight: 800;
   font-size: 16px;
   letter-spacing: 2px;
-  color: #fff;
+  color: #111;
   text-align: center;
-  margin-bottom: 18px;
+  margin-bottom: 20px;
   padding-right: 32px;
+  border-bottom: 1px solid #111;
+  padding-bottom: 14px;
 }
 .privacy-modal-body {
   font-size: 12px;
-  line-height: 1.7;
-  color: rgba(216, 236, 255, 0.85);
+  line-height: 1.75;
+  color: #333;
 }
 .privacy-modal-body p {
   margin: 0 0 12px 0;
@@ -287,42 +288,43 @@ canvas { display: none; }
   margin: 0 0 14px 0;
 }
 .privacy-modal-body li {
-  padding: 10px 12px;
-  margin-bottom: 8px;
-  background: rgba(0, 152, 234, 0.05);
-  border-left: 2px solid rgba(0, 152, 234, 0.4);
-  border-radius: 6px;
+  padding: 8px 0 8px 14px;
+  margin-bottom: 4px;
+  border-left: 2px solid #111;
+  background: transparent;
+  border-radius: 0;
 }
 .privacy-modal-body b {
-  color: #0098ea;
+  color: #000;
   font-weight: 700;
 }
 .privacy-modal-final {
-  padding: 12px !important;
-  background: rgba(255, 200, 0, 0.08);
-  border: 1px solid rgba(255, 200, 0, 0.25);
-  border-radius: 8px;
+  padding: 12px 14px !important;
+  border: 1px solid #111 !important;
+  border-radius: 6px;
   font-size: 11px !important;
-  line-height: 1.6 !important;
-  color: #ffd97a !important;
+  line-height: 1.7 !important;
+  color: #111 !important;
+  background: #f5f5f5;
+  margin-top: 8px;
 }
 .privacy-modal-ok {
   width: 100%;
   height: 44px;
   margin-top: 18px;
-  border-radius: 12px;
-  border: none;
-  background: #0098ea;
+  border-radius: 8px;
+  border: 1px solid #111;
+  background: #111;
   color: #fff;
   font-family: 'Space Mono', monospace;
   font-weight: 700;
   font-size: 12px;
   letter-spacing: 2px;
   cursor: pointer;
-  box-shadow: 0 4px 18px rgba(0,152,234,0.35);
 }
 .privacy-modal-ok:active {
   transform: translateY(1px);
+  background: #333;
 }
 
 /* Full-screen posting overlay — a dim backdrop with a rotating
@@ -3461,11 +3463,23 @@ export default function Home() {
               <div className="privacy-modal-title">PRIVACY &amp; CAPTURE NOTICE</div>
               <div className="privacy-modal-body">
                 <p>
-                  zkTruth は撮影データを <b>@zktruth_capture</b> の公開Telegramチャンネルに投稿します。以下の点を確認してください:
+                  zkTruth は撮影データを <b>@zktruth_capture</b> の公開Telegramチャンネルに投稿します。撮影・投稿前に以下を必ず確認してください。
                 </p>
                 <ul>
                   <li>
                     <b>公開投稿</b> — 撮影した写真/動画は誰でも閲覧可能な Telegram の公開チャンネルに投稿されます。取り消しはチャンネル管理者による削除以外できません。
+                  </li>
+                  <li>
+                    <b>人物の顔・肖像</b> — 撮影に人物の顔が映る場合、その本人の<b>事前同意</b>を必ず取得してください。同意なしの撮影・投稿は肖像権侵害となる可能性があります。
+                  </li>
+                  <li>
+                    <b>第三者の映り込み</b> — 公共の場でも通行人など第三者の顔が映る場合、必要に応じてぼかし/トリミングなどの配慮をしてください。
+                  </li>
+                  <li>
+                    <b>未成年者</b> — 未成年者を撮影・投稿する場合は<b>保護者の同意</b>が必須です。子どもの安全に配慮した投稿を心がけてください。
+                  </li>
+                  <li>
+                    <b>私有地・施設内での撮影</b> — 店舗・美術館・施設内など、撮影禁止・制限がある場所のルールに従ってください。
                   </li>
                   <li>
                     <b>位置情報</b> — GPS が有効な場合、撮影地点の緯度経度（または最寄りの地名）が投稿キャプションに含まれます。プライベートな場所での撮影前に位置情報を OFF にしてください。
@@ -3483,11 +3497,11 @@ export default function Home() {
                     <b>データの保存先</b> — メディアは Telegram の CDN が保存し、zkTruth 側のサーバーには保存されません。Telegram のプライバシーポリシーが適用されます。
                   </li>
                   <li>
-                    <b>MINT ON TON</b> — オンチェーン記録（Phase 4以降）を選択した場合、ハッシュ・タイムスタンプが TON ブロックチェーンに<b>永久に</b>刻まれます。削除はできません。
+                    <b>MINT ON TON</b> — オンチェーン記録を選択した場合、ハッシュ・タイムスタンプが TON ブロックチェーンに<b>永久に</b>刻まれます。削除はできません。
                   </li>
                 </ul>
                 <p className="privacy-modal-final">
-                  撮影する前に対象人物の同意を取ってください。他人のプライバシーや著作権を侵害する内容の投稿は禁止されます。違反投稿はチャンネル管理者が削除します。
+                  他人のプライバシー・肖像権・著作権を侵害する内容、暴力的・差別的・違法な内容の投稿は禁止されます。違反投稿はチャンネル管理者が削除し、悪質な場合はユーザーの利用を制限する場合があります。
                 </p>
               </div>
               <button
