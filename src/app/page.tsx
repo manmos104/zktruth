@@ -2928,30 +2928,41 @@ export default function Home() {
 
   const paintBlurAt = useCallback((clientX: number, clientY: number) => {
     const canvas = blurCanvasRef.current;
-    const blurred = blurredSourceRef.current;
-    if (!canvas || !blurred) return;
+    const original = blurOriginalRef.current;
+    if (!canvas || !original) return;
     const rect = canvas.getBoundingClientRect();
+    if (rect.width === 0 || rect.height === 0) return;
     const scaleX = canvas.width / rect.width;
     const scaleY = canvas.height / rect.height;
     const x = (clientX - rect.left) * scaleX;
     const y = (clientY - rect.top) * scaleY;
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
-    // Brush size scales with image so it feels the same on portrait
-    // vs landscape captures.
+    // Brush size scales with image so the felt size is consistent
+    // across portrait vs landscape captures.
     const radius = Math.max(canvas.width, canvas.height) * 0.055;
+    // Apply blur directly on the visible canvas — iOS Safari has a
+    // long-standing bug where `ctx.filter = 'blur(...)'` silently
+    // does nothing on offscreen (detached) canvases, so pre-baking
+    // a blurred source and clip-copying from it produced no visible
+    // change. Running the filter here, on the in-DOM canvas, is
+    // reliable on every browser we target.
     ctx.save();
     ctx.beginPath();
     ctx.arc(x, y, radius, 0, Math.PI * 2);
     ctx.clip();
-    ctx.drawImage(blurred, 0, 0);
+    ctx.filter = 'blur(20px)';
+    ctx.drawImage(original, 0, 0);
     ctx.restore();
   }, []);
 
   const handleBlurPointerDown = useCallback((e: React.PointerEvent<HTMLCanvasElement>) => {
     if (!blurMode) return;
     e.stopPropagation();
-    (e.target as HTMLElement).setPointerCapture(e.pointerId);
+    // setPointerCapture occasionally throws on iOS Safari for
+    // pointerType="touch" — swallow it so we don't lose the whole
+    // drag flow to an unrelated capability check.
+    try { (e.target as HTMLElement).setPointerCapture(e.pointerId); } catch { /* ignore */ }
     blurIsDrawingRef.current = true;
     paintBlurAt(e.clientX, e.clientY);
     setBlurDirty(true);
@@ -2965,6 +2976,38 @@ export default function Home() {
   }, [blurMode, paintBlurAt]);
 
   const handleBlurPointerUp = useCallback((e: React.PointerEvent<HTMLCanvasElement>) => {
+    if (!blurMode) return;
+    e.stopPropagation();
+    blurIsDrawingRef.current = false;
+  }, [blurMode]);
+
+  // === Touch-event fallbacks ===================================
+  // Some iOS Safari versions running inside Telegram Mini App's
+  // WebView have flaky Pointer Events on <canvas> — pointerdown
+  // fires but subsequent pointermove doesn't, breaking drag.
+  // Wiring the native touch events in parallel gives us a reliable
+  // path; `preventDefault()` on touchmove kills the WebView's
+  // default pan-to-scroll so the finger stays on the brush.
+  const handleBlurTouchStart = useCallback((e: React.TouchEvent<HTMLCanvasElement>) => {
+    if (!blurMode) return;
+    e.stopPropagation();
+    const t = e.touches[0];
+    if (!t) return;
+    blurIsDrawingRef.current = true;
+    paintBlurAt(t.clientX, t.clientY);
+    setBlurDirty(true);
+  }, [blurMode, paintBlurAt]);
+
+  const handleBlurTouchMove = useCallback((e: React.TouchEvent<HTMLCanvasElement>) => {
+    if (!blurMode || !blurIsDrawingRef.current) return;
+    e.preventDefault();
+    e.stopPropagation();
+    const t = e.touches[0];
+    if (!t) return;
+    paintBlurAt(t.clientX, t.clientY);
+  }, [blurMode, paintBlurAt]);
+
+  const handleBlurTouchEnd = useCallback((e: React.TouchEvent<HTMLCanvasElement>) => {
     if (!blurMode) return;
     e.stopPropagation();
     blurIsDrawingRef.current = false;
@@ -3385,6 +3428,10 @@ export default function Home() {
                       onPointerUp={handleBlurPointerUp}
                       onPointerCancel={handleBlurPointerUp}
                       onPointerLeave={handleBlurPointerUp}
+                      onTouchStart={handleBlurTouchStart}
+                      onTouchMove={handleBlurTouchMove}
+                      onTouchEnd={handleBlurTouchEnd}
+                      onTouchCancel={handleBlurTouchEnd}
                       style={{
                         display: 'block',
                         // Explicit width/height set in the load
