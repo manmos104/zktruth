@@ -3765,6 +3765,9 @@ export default function Home() {
                     <b>Bystanders</b> — In public places, please blur bystanders&apos; faces when necessary before posting.
                   </li>
                   <li>
+                    <b>Video mode has no blur editor</b> — The blur tool works on photos only. If your capture needs to redact faces, license plates, or any sensitive detail, <b>use Photo mode</b>. Videos are posted to the channel as recorded, without any masking.
+                  </li>
+                  <li>
                     <b>Minors</b> — Capturing or posting media of minors requires <b>parental consent</b>. Prioritize child safety.
                   </li>
                   <li>
