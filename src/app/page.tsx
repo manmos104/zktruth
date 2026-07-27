@@ -3460,7 +3460,7 @@ export default function Home() {
               >
                 ✕
               </button>
-              <div className="privacy-modal-title">PRIVACY &amp; CAPTURE NOTICE</div>
+              <div className="privacy-modal-title">PRIVACY NOTICE</div>
               <div className="privacy-modal-body">
                 <p>
                   zkTruth は撮影データを <b>@zktruth_capture</b> の公開Telegramチャンネルに投稿します。撮影・投稿前に以下を必ず確認してください。
