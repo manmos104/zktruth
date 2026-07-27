@@ -2873,15 +2873,41 @@ export default function Home() {
     img.onload = () => {
       blurOriginalRef.current = img;
       const canvas = blurCanvasRef.current;
+      const naturalW = img.naturalWidth || img.width;
+      const naturalH = img.naturalHeight || img.height;
       if (canvas) {
-        canvas.width = img.naturalWidth || img.width;
-        canvas.height = img.naturalHeight || img.height;
+        // Backing store gets the full pixel resolution so blur brush
+        // strokes match the source detail — we'll shrink for display
+        // via explicit CSS width/height below.
+        canvas.width = naturalW;
+        canvas.height = naturalH;
+        // Fit-within-viewport aspect-preserving sizing computed in JS.
+        // CSS `max-width/max-height` alone doesn't reliably preserve
+        // aspect ratio on <canvas> across browsers, so we compute the
+        // display box manually and set it inline.
+        const vpW = window.innerWidth;
+        const vpH = window.innerHeight;
+        const imgAR = naturalW / naturalH;
+        const vpAR = vpW / vpH;
+        let dispW: number;
+        let dispH: number;
+        if (imgAR > vpAR) {
+          // Image is wider than viewport ratio → fit to viewport width
+          dispW = vpW;
+          dispH = Math.round(vpW / imgAR);
+        } else {
+          // Image is taller → fit to viewport height
+          dispH = vpH;
+          dispW = Math.round(vpH * imgAR);
+        }
+        canvas.style.width = `${dispW}px`;
+        canvas.style.height = `${dispH}px`;
         const ctx = canvas.getContext('2d');
         ctx?.drawImage(img, 0, 0);
       }
       const blurred = document.createElement('canvas');
-      blurred.width = img.naturalWidth || img.width;
-      blurred.height = img.naturalHeight || img.height;
+      blurred.width = naturalW;
+      blurred.height = naturalH;
       const bCtx = blurred.getContext('2d');
       if (bCtx) {
         bCtx.filter = 'blur(24px)';
@@ -3360,12 +3386,13 @@ export default function Home() {
                       onPointerCancel={handleBlurPointerUp}
                       onPointerLeave={handleBlurPointerUp}
                       style={{
-                        maxWidth: '100%',
-                        maxHeight: '100%',
-                        objectFit: 'contain',
-                        // touchAction none while editing so the mobile
-                        // browser doesn't hijack the drag into a scroll
-                        // or pinch-zoom.
+                        display: 'block',
+                        // Explicit width/height set in the load
+                        // handler above — leaving these undefined so
+                        // the canvas renders at the JS-computed
+                        // display box instead of its intrinsic
+                        // pixel dimensions (which would overflow the
+                        // viewport into black).
                         touchAction: blurMode ? 'none' : 'auto',
                         cursor: blurMode ? 'crosshair' : 'default',
                         userSelect: 'none',
@@ -3375,17 +3402,20 @@ export default function Home() {
                 )}
 
                 {/* Editor toolbar — only shown for photos (video edit
-                    is out of scope for MVP). Sits at the top-left so
-                    the top-right × doesn't clash. */}
+                    is out of scope for MVP). Bottom-left placement
+                    keeps it out of the way of both the top-right ×
+                    and the middle of the image where the user is
+                    painting. */}
                 {!capturedVideoUrl && capturedImage && (
                   <div
                     style={{
                       position: 'absolute',
-                      top: 14,
+                      bottom: 24,
                       left: 14,
                       display: 'flex',
                       gap: 8,
                       zIndex: 2,
+                      flexWrap: 'wrap',
                     }}
                     onClick={(e) => e.stopPropagation()}
                   >
