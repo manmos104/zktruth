@@ -1892,6 +1892,12 @@ export default function Home() {
   const [zoomLevel, setZoomLevel] = useState(0.5);
   const [gpsCoords, setGpsCoords] = useState<string>("Acquiring GPS…");
   const [gpsLocation, setGpsLocation] = useState<string>("");
+  // User-facing switch that lets people opt out of location entirely
+  // — the geolocation watcher below is gated on this, and downstream
+  // capture/share code already treats an "Acquiring GPS…"-style
+  // placeholder as "no location" so nothing GPS-derived leaks into
+  // the Telegram caption when the toggle is off.
+  const [gpsEnabled, setGpsEnabled] = useState<boolean>(true);
 
   // Gas fee shown as Gram (per Durov's Gram wallet rebrand) — the
   // chain itself is still TON L1, but the native currency label
@@ -1958,8 +1964,17 @@ export default function Home() {
 
 
   useEffect(() => {
+    if (!gpsEnabled) {
+      // Location disabled by the user — clear any previously-seen
+      // reading so the HUD reflects the off state and downstream
+      // capture code doesn't attach stale coords to a post.
+      setGpsCoords("GPS OFF");
+      setGpsLocation("");
+      return;
+    }
     let reverseGeocodeDone = false;
     if (navigator.geolocation) {
+      setGpsCoords("Acquiring GPS…");
       const watchId = navigator.geolocation.watchPosition(
         (pos) => {
           const lat = pos.coords.latitude;
@@ -1991,7 +2006,7 @@ export default function Home() {
     } else {
       setGpsCoords("GPS not supported");
     }
-  }, []);
+  }, [gpsEnabled]);
 
   // Pick a specific back-camera lens by enumerating devices. iOS Safari exposes
   // labels like "Back Ultra Wide Camera", "Back Camera", "Back Telephoto Camera"
@@ -2804,7 +2819,11 @@ export default function Home() {
     const metadata = {
       hash: proofData?.hash,
       timestamp: proofData?.timestamp,
-      gps: gpsLocation || (gpsCoords && !gpsCoords.startsWith('Acquiring') ? gpsCoords : undefined),
+      // Skip GPS entirely when the user has toggled it off — never
+      // let stale "GPS OFF" placeholders sneak into the caption.
+      gps: gpsEnabled
+        ? gpsLocation || (gpsCoords && !gpsCoords.startsWith('Acquiring') && gpsCoords !== 'GPS OFF' && gpsCoords !== 'GPS unavailable' && gpsCoords !== 'GPS not supported' ? gpsCoords : undefined)
+        : undefined,
       wallet: tonWallet?.account.address,
       comment: captureComment?.trim() || undefined,
     }
@@ -2855,6 +2874,7 @@ export default function Home() {
     proofData,
     gpsLocation,
     gpsCoords,
+    gpsEnabled,
     tonWallet,
     captureComment,
   ]);
@@ -3187,6 +3207,35 @@ export default function Home() {
                   </svg>
                 </button>
                 <div className="side-btn-label">INFO</div>
+              </div>
+              {/* GPS toggle. Location is enabled by default (Proof of
+                  Capture's whole point is verifiable spatial context),
+                  but users need a fast opt-out for private venues. A
+                  diagonal slash overlays the pin when off so the state
+                  reads clearly at a glance even without the label. */}
+              <div>
+                <button
+                  className="side-btn"
+                  onClick={() => setGpsEnabled((v) => !v)}
+                  aria-label={gpsEnabled ? 'Turn location off' : 'Turn location on'}
+                  aria-pressed={gpsEnabled}
+                  style={{
+                    color: gpsEnabled ? '#fff' : '#ff5a6a',
+                    borderColor: gpsEnabled ? undefined : 'rgba(255,90,106,0.6)',
+                  }}
+                >
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{width:22,height:22}} strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M12 22s-8-7-8-13a8 8 0 1 1 16 0c0 6-8 13-8 13z" />
+                    <circle cx="12" cy="9" r="2.5" />
+                    {!gpsEnabled && <line x1="4" y1="4" x2="20" y2="20" />}
+                  </svg>
+                </button>
+                <div
+                  className="side-btn-label"
+                  style={{ color: gpsEnabled ? undefined : '#ff5a6a' }}
+                >
+                  {gpsEnabled ? 'GPS' : 'GPS OFF'}
+                </div>
               </div>
               <div>
                 <button className="side-btn" onClick={flipCamera}><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{width:22,height:22}}><path d="M1 4v6h6"/><path d="M23 20v-6h-6"/><path d="M20.49 9A9 9 0 0 0 5.64 5.64L1 10m22 4-4.64 4.36A9 9 0 0 1 3.51 15"/></svg></button>
