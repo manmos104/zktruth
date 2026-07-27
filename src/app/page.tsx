@@ -208,6 +208,123 @@ canvas { display: none; }
   z-index: 5;
   pointer-events: none;
 }
+/* Privacy notice modal — dark cinematic sheet that pops up over the
+   camera screen (or any screen) when the user taps the INFO button.
+   Backdrop closes on tap-outside; the sheet itself stops
+   propagation so users can freely scroll inside. */
+.privacy-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 8, 20, 0.85);
+  backdrop-filter: blur(10px);
+  z-index: 10005;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  animation: privacyFade 0.2s ease-out;
+}
+@keyframes privacyFade {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+.privacy-modal {
+  background: linear-gradient(180deg, #0b1220 0%, #060a15 100%);
+  border: 1px solid rgba(0, 152, 234, 0.35);
+  border-radius: 20px;
+  padding: 28px 22px 22px;
+  max-width: 420px;
+  width: 100%;
+  max-height: 82vh;
+  overflow-y: auto;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.6), inset 0 1px 0 rgba(255,255,255,0.05);
+  position: relative;
+  font-family: 'Space Mono', monospace;
+  color: #d8ecff;
+  animation: privacyPop 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+@keyframes privacyPop {
+  from { opacity: 0; transform: translateY(20px) scale(0.96); }
+  to   { opacity: 1; transform: translateY(0) scale(1); }
+}
+.privacy-modal-close {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  border: 1px solid rgba(255,255,255,0.15);
+  background: rgba(255,255,255,0.05);
+  color: #fff;
+  font-size: 14px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.privacy-modal-title {
+  font-family: 'Syne', sans-serif;
+  font-weight: 800;
+  font-size: 16px;
+  letter-spacing: 2px;
+  color: #fff;
+  text-align: center;
+  margin-bottom: 18px;
+  padding-right: 32px;
+}
+.privacy-modal-body {
+  font-size: 12px;
+  line-height: 1.7;
+  color: rgba(216, 236, 255, 0.85);
+}
+.privacy-modal-body p {
+  margin: 0 0 12px 0;
+}
+.privacy-modal-body ul {
+  list-style: none;
+  padding: 0;
+  margin: 0 0 14px 0;
+}
+.privacy-modal-body li {
+  padding: 10px 12px;
+  margin-bottom: 8px;
+  background: rgba(0, 152, 234, 0.05);
+  border-left: 2px solid rgba(0, 152, 234, 0.4);
+  border-radius: 6px;
+}
+.privacy-modal-body b {
+  color: #0098ea;
+  font-weight: 700;
+}
+.privacy-modal-final {
+  padding: 12px !important;
+  background: rgba(255, 200, 0, 0.08);
+  border: 1px solid rgba(255, 200, 0, 0.25);
+  border-radius: 8px;
+  font-size: 11px !important;
+  line-height: 1.6 !important;
+  color: #ffd97a !important;
+}
+.privacy-modal-ok {
+  width: 100%;
+  height: 44px;
+  margin-top: 18px;
+  border-radius: 12px;
+  border: none;
+  background: #0098ea;
+  color: #fff;
+  font-family: 'Space Mono', monospace;
+  font-weight: 700;
+  font-size: 12px;
+  letter-spacing: 2px;
+  cursor: pointer;
+  box-shadow: 0 4px 18px rgba(0,152,234,0.35);
+}
+.privacy-modal-ok:active {
+  transform: translateY(1px);
+}
+
 /* Full-screen posting overlay — a dim backdrop with a rotating
    diamond ring and progress text. Renders while the SHARE flow is
    awaiting the Telegram Bot API. Blocks pointer events so a jittery
@@ -1665,6 +1782,10 @@ export default function Home() {
   // after a successful post so the outcome reads as "done!" rather
   // than just the toast fading out.
   const [shareSuccess, setShareSuccess] = useState(false);
+  // Privacy notice modal — surfaced by the small "i" button in the
+  // camera side-panel so users can review what actually gets shared
+  // (public channel, GPS, wallet, etc.) before they hit SHARE.
+  const [privacyOpen, setPrivacyOpen] = useState(false);
   // On-screen recorder diagnostics for debugging audio capture on devices
   // where we don't have access to a JS console (e.g., iPhone Safari).
   const [recordDebug, setRecordDebug] = useState<string>("");
@@ -2850,14 +2971,25 @@ export default function Home() {
             )}
 
             <div className="side-buttons">
+              {/* Privacy notice trigger. Sits above FLIP so users can
+                  glance the "what gets shared" briefing before the
+                  first capture. Kept on the camera screen (not verify)
+                  because expectations should be set BEFORE the shutter
+                  fires, not after. */}
+              <div>
+                <button className="side-btn" onClick={() => setPrivacyOpen(true)} aria-label="Privacy notice">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{width:22,height:22}} strokeLinecap="round" strokeLinejoin="round">
+                    <circle cx="12" cy="12" r="10" />
+                    <path d="M12 16v-4" />
+                    <path d="M12 8h.01" />
+                  </svg>
+                </button>
+                <div className="side-btn-label">INFO</div>
+              </div>
               <div>
                 <button className="side-btn" onClick={flipCamera}><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{width:22,height:22}}><path d="M1 4v6h6"/><path d="M23 20v-6h-6"/><path d="M20.49 9A9 9 0 0 0 5.64 5.64L1 10m22 4-4.64 4.36A9 9 0 0 1 3.51 15"/></svg></button>
                 <div className="side-btn-label">FLIP</div>
               </div>
-              {/* Camera-screen WALLET shortcut removed. Wallet
-                  connection is now handled by the CONNECT WALLET
-                  button on the verify screen post-capture, keeping
-                  the camera HUD focused on capture-only affordances. */}
             </div>
 
             <div className="bottom-controls">
@@ -3306,6 +3438,64 @@ export default function Home() {
                 </button>
                 <div className="sns-copy-status">{copyStatus}</div>
               </div>
+            </div>
+          </div>
+        )}
+
+        {/* Privacy notice modal. Explains what a "capture" actually
+            publishes so users don't post GPS/media without knowing.
+            Rendered at the app root so it works from any screen. */}
+        {privacyOpen && (
+          <div
+            className="privacy-modal-backdrop"
+            onClick={() => setPrivacyOpen(false)}
+          >
+            <div className="privacy-modal" onClick={(e) => e.stopPropagation()}>
+              <button
+                className="privacy-modal-close"
+                onClick={() => setPrivacyOpen(false)}
+                aria-label="Close"
+              >
+                ✕
+              </button>
+              <div className="privacy-modal-title">PRIVACY &amp; CAPTURE NOTICE</div>
+              <div className="privacy-modal-body">
+                <p>
+                  zkTruth は撮影データを <b>@zktruth_capture</b> の公開Telegramチャンネルに投稿します。以下の点を確認してください:
+                </p>
+                <ul>
+                  <li>
+                    <b>公開投稿</b> — 撮影した写真/動画は誰でも閲覧可能な Telegram の公開チャンネルに投稿されます。取り消しはチャンネル管理者による削除以外できません。
+                  </li>
+                  <li>
+                    <b>位置情報</b> — GPS が有効な場合、撮影地点の緯度経度（または最寄りの地名）が投稿キャプションに含まれます。プライベートな場所での撮影前に位置情報を OFF にしてください。
+                  </li>
+                  <li>
+                    <b>タイムスタンプ</b> — 撮影時刻 (UTC) がキャプションに含まれます。
+                  </li>
+                  <li>
+                    <b>コンテンツハッシュ</b> — 撮影内容の SHA-256 ハッシュがキャプションに含まれます。同一画像かの照合に使えますが、画像自体を復元することはできません。
+                  </li>
+                  <li>
+                    <b>ウォレットアドレス</b> — TON ウォレットを接続した状態で投稿すると、そのアドレスが「作者」としてキャプションに表示されます。匿名で投稿したい場合はウォレット未接続のまま SIGN THIS HASH を押してください。
+                  </li>
+                  <li>
+                    <b>データの保存先</b> — メディアは Telegram の CDN が保存し、zkTruth 側のサーバーには保存されません。Telegram のプライバシーポリシーが適用されます。
+                  </li>
+                  <li>
+                    <b>MINT ON TON</b> — オンチェーン記録（Phase 4以降）を選択した場合、ハッシュ・タイムスタンプが TON ブロックチェーンに<b>永久に</b>刻まれます。削除はできません。
+                  </li>
+                </ul>
+                <p className="privacy-modal-final">
+                  撮影する前に対象人物の同意を取ってください。他人のプライバシーや著作権を侵害する内容の投稿は禁止されます。違反投稿はチャンネル管理者が削除します。
+                </p>
+              </div>
+              <button
+                className="privacy-modal-ok"
+                onClick={() => setPrivacyOpen(false)}
+              >
+                UNDERSTOOD
+              </button>
             </div>
           </div>
         )}
