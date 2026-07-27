@@ -2852,18 +2852,20 @@ export default function Home() {
                     handlers it depended on are no longer rendered; their
                     supporting code will be deleted in a follow-up commit
                     once Phase 4 (TON Tact contract) lands. */}
-                {/* TON Connect entry point wrapped in the same
-                    `wid-verify-btn` shell as the surrounding buttons so
-                    the verify screen reads as one cohesive stack. We
-                    drive the modal manually via `tonConnectUI` instead
-                    of using the library's `<TonConnectButton />` — the
-                    default component ships its own pill-shaped chip
-                    which fights the app's flat rectangular button
-                    language. Blue kept because it's TON's brand cue. */}
+                {/* SIGN THIS HASH is the quick-share path: it posts
+                    the captured media + hash straight to the public
+                    Telegram channel via our Bot API relay — no wallet,
+                    no on-chain transaction. If the user happens to
+                    have a wallet linked already, `handleShareWithImage`
+                    picks it up automatically and includes the address
+                    in the caption as attribution; otherwise the post
+                    lands anonymously. Wallet connection is deferred
+                    to the MINT ON TON flow where it's actually needed
+                    for signing the on-chain mint. */}
                 <button
                   type="button"
                   className="wid-verify-btn"
-                  onClick={() => tonWallet ? tonConnectUI.disconnect() : tonConnectUI.openModal()}
+                  onClick={handleShareWithImage}
                   style={{
                     marginTop: 10,
                     background: '#0098ea',
@@ -2872,7 +2874,7 @@ export default function Home() {
                     boxShadow: '0 4px 18px rgba(0,152,234,0.32)',
                   }}
                 >
-                  {shortTonAddr ? `SIGNER :: ${shortTonAddr}` : 'SIGN THIS HASH'}
+                  {shortTonAddr ? `SIGN AS :: ${shortTonAddr}` : 'SIGN THIS HASH'}
                 </button>
 
                 {/* Placeholder mint button — routes into the existing
