@@ -2949,8 +2949,10 @@ export default function Home() {
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
     // Brush size scales with image so the felt size is consistent
-    // across portrait vs landscape captures.
-    const radius = Math.max(canvas.width, canvas.height) * 0.055;
+    // across portrait vs landscape captures. Tuned to ~2.8% of the
+    // longer edge — fine enough to redact just a face or a license
+    // plate without spilling into surrounding detail.
+    const radius = Math.max(canvas.width, canvas.height) * 0.028;
     // Clip a circle at the brush position, then paint the tiny
     // downsampled canvas back up to full resolution inside that
     // circle. The upscale is bilinear (via imageSmoothing) so the
