@@ -1897,7 +1897,13 @@ export default function Home() {
   // capture/share code already treats an "Acquiring GPS…"-style
   // placeholder as "no location" so nothing GPS-derived leaks into
   // the Telegram caption when the toggle is off.
-  const [gpsEnabled, setGpsEnabled] = useState<boolean>(true);
+  //
+  // Default OFF: previously true, which triggered the browser's
+  // location-permission bubble the instant the Mini App opened —
+  // startling users who hadn't done anything yet. Now the watcher
+  // stays cold until the user explicitly taps the GPS button, and
+  // that tap is the same gesture that consents to the permission.
+  const [gpsEnabled, setGpsEnabled] = useState<boolean>(false);
 
   // Gas fee shown as Gram (per Durov's Gram wallet rebrand) — the
   // chain itself is still TON L1, but the native currency label
@@ -2036,7 +2042,7 @@ export default function Home() {
   // requested aspect ratio coaxes a wider sensor crop out of it.
   const [isFrontWide, setIsFrontWide] = useState(false);
 
-  const startCamera = useCallback(async (facing?: "environment"|"user", opts?: { deviceId?: string; frontWide?: boolean }) => {
+  const startCamera = useCallback(async (facing?: "environment"|"user", opts?: { deviceId?: string; frontWide?: boolean; audio?: boolean }) => {
     try {
       if (streamRef.current) {
         streamRef.current.getTracks().forEach(t => t.stop());
@@ -2049,16 +2055,26 @@ export default function Home() {
       } else {
         video = { facingMode: facing || facingMode, width: { ideal: 1080 }, height: { ideal: 1920 } };
       }
-      // Request the microphone alongside the camera so MediaRecorder can
-      // pick up the audio track when the user records a video. Use a
-      // bare `audio: true` rather than a constraints object — iOS Safari
-      // appears to honour the simpler form more reliably in our tests
-      // (a constraints object with echoCancellation/noiseSuppression
-      // succeeded but the resulting audio track was silently dropped by
-      // the mp4 encoder).
+      // Request the microphone alongside the camera ONLY when the
+      // user is in video mode. Photo mode never needs audio, so
+      // asking for it on Mini App open triggered a "camera and
+      // microphone" permission dialog that scared users off before
+      // they'd done anything. Requesting audio only when the user
+      // explicitly switches to video mode makes the initial popup
+      // camera-only and matches actual usage. Use a bare `audio:
+      // true` rather than a constraints object — iOS Safari honours
+      // the simpler form more reliably (a constraints object with
+      // echoCancellation/noiseSuppression succeeded but the resulting
+      // audio track was silently dropped by the mp4 encoder).
+      // Audio inclusion: explicit `opts.audio` wins (so callers can
+      // force-request it in response to a user gesture like tapping
+      // the VIDEO mode tab), otherwise mirror the current capture
+      // mode. Photo mode → no audio → camera-only permission dialog
+      // on first open.
+      const wantAudio = opts?.audio ?? captureMode === 'video';
       const constraints: MediaStreamConstraints = {
         video,
-        audio: true,
+        audio: wantAudio,
       };
       const stream = await navigator.mediaDevices.getUserMedia(constraints);
       streamRef.current = stream;
@@ -3249,7 +3265,30 @@ export default function Home() {
                   with the FLIP button. */}
               <div className="mode-tabs">
                 <button className={`mode-tab ${captureMode === 'photo' ? 'active' : ''}`} onClick={() => !recording && setCaptureMode('photo')}>PHOTO</button>
-                <button className={`mode-tab ${captureMode === 'video' ? 'active' : ''}`} onClick={() => !recording && setCaptureMode('video')}>VIDEO</button>
+                <button
+                  className={`mode-tab ${captureMode === 'video' ? 'active' : ''}`}
+                  onClick={async () => {
+                    if (recording) return;
+                    setCaptureMode('video');
+                    // Photo mode uses a video-only stream (no mic
+                    // permission requested on Mini App open). When
+                    // the user switches into video mode we need to
+                    // re-negotiate the stream to include audio so
+                    // MediaRecorder can lay down a real audio track.
+                    // The re-request also is the user gesture that
+                    // consents to the mic permission dialog.
+                    const currentStream = streamRef.current;
+                    const hasAudio = currentStream?.getAudioTracks().length ?? 0;
+                    if (!hasAudio) {
+                      // Pass `audio: true` explicitly — the state
+                      // update from setCaptureMode above hasn't
+                      // reflected yet when this closure runs, so the
+                      // captureMode-based default inside startCamera
+                      // would still see 'photo'.
+                      await startCamera(facingMode, { audio: true });
+                    }
+                  }}
+                >VIDEO</button>
               </div>
               <button className={`btn-capture ${captureMode === 'video' ? 'video-mode' : ''} ${recording ? 'recording' : ''}`} onClick={captureMode === 'photo' ? handleCapture : handleVideoCapture} />
             </div>
