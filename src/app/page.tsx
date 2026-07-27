@@ -3463,45 +3463,45 @@ export default function Home() {
               <div className="privacy-modal-title">PRIVACY NOTICE</div>
               <div className="privacy-modal-body">
                 <p>
-                  zkTruth は撮影データを <b>@zktruth_capture</b> の公開Telegramチャンネルに投稿します。撮影・投稿前に以下を必ず確認してください。
+                  zkTruth posts your captures to the public Telegram channel <b>@zktruth_capture</b>. Please review the following before capturing or posting.
                 </p>
                 <ul>
                   <li>
-                    <b>公開投稿</b> — 撮影した写真/動画は誰でも閲覧可能な Telegram の公開チャンネルに投稿されます。取り消しはチャンネル管理者による削除以外できません。
+                    <b>Public post</b> — Photos and videos are posted to a publicly visible Telegram channel. Posts cannot be revoked except by channel admin removal.
                   </li>
                   <li>
-                    <b>人物の顔・肖像</b> — 撮影に人物の顔が映る場合、その本人の<b>事前同意</b>を必ず取得してください。同意なしの撮影・投稿は肖像権侵害となる可能性があります。
+                    <b>Faces &amp; portraits</b> — If a person&apos;s face is captured, you must obtain their <b>prior consent</b>. Posting without consent may violate portrait rights.
                   </li>
                   <li>
-                    <b>第三者の映り込み</b> — 公共の場でも通行人など第三者の顔が映る場合、必要に応じてぼかしなどの配慮をしてください。
+                    <b>Bystanders</b> — In public places, please blur bystanders&apos; faces when necessary before posting.
                   </li>
                   <li>
-                    <b>未成年者</b> — 未成年者を撮影・投稿する場合は<b>保護者の同意</b>が必須です。子どもの安全に配慮した投稿を心がけてください。
+                    <b>Minors</b> — Capturing or posting media of minors requires <b>parental consent</b>. Prioritize child safety.
                   </li>
                   <li>
-                    <b>私有地・施設内での撮影</b> — 店舗・美術館・施設内など、撮影禁止・制限がある場所のルールに従ってください。
+                    <b>Private property &amp; venues</b> — Follow the rules of any location that restricts or prohibits photography (stores, museums, private venues, etc.).
                   </li>
                   <li>
-                    <b>位置情報</b> — GPS が有効な場合、撮影地点の緯度経度（または最寄りの地名）が投稿キャプションに含まれます。プライベートな場所での撮影前に位置情報を OFF にしてください。
+                    <b>Location data</b> — If GPS is enabled, the capture location (coordinates or nearest place name) will be included in the post caption. Turn off location before capturing in private places.
                   </li>
                   <li>
-                    <b>タイムスタンプ</b> — 撮影時刻 (UTC) がキャプションに含まれます。
+                    <b>Timestamp</b> — The capture time (UTC) is included in the caption.
                   </li>
                   <li>
-                    <b>コンテンツハッシュ</b> — 撮影内容の SHA-256 ハッシュがキャプションに含まれます。同一画像かの照合に使えますが、画像自体を復元することはできません。
+                    <b>Content hash</b> — The SHA-256 hash of the media is included in the caption. It lets others verify identical content but cannot reveal the media itself.
                   </li>
                   <li>
-                    <b>ウォレットアドレス</b> — TON ウォレットを接続した状態で投稿すると、そのアドレスが「作者」としてキャプションに表示されます。匿名で投稿したい場合はウォレット未接続のまま SIGN THIS HASH を押してください。
+                    <b>Wallet address</b> — If a TON wallet is connected when posting, its address appears as the &ldquo;author&rdquo; in the caption. To post anonymously, tap SIGN THIS HASH without connecting a wallet.
                   </li>
                   <li>
-                    <b>データの保存先</b> — メディアは Telegram の CDN が保存し、zkTruth 側のサーバーには保存されません。Telegram のプライバシーポリシーが適用されます。
+                    <b>Data storage</b> — Media is hosted on Telegram&apos;s CDN; zkTruth servers do not store your media. Telegram&apos;s privacy policy applies.
                   </li>
                   <li>
-                    <b>MINT ON TON</b> — オンチェーン記録を選択した場合、ハッシュ・タイムスタンプが TON ブロックチェーンに<b>永久に</b>刻まれます。削除はできません。
+                    <b>MINT ON TON</b> — If you choose on-chain minting, the hash and timestamp are written <b>permanently</b> to the TON blockchain. On-chain records cannot be deleted.
                   </li>
                 </ul>
                 <p className="privacy-modal-final">
-                  他人のプライバシー・肖像権・著作権を侵害する内容、暴力的・差別的・違法な内容の投稿は禁止されます。違反投稿はチャンネル管理者が削除し、悪質な場合はユーザーの利用を制限する場合があります。
+                  Content that violates others&apos; privacy, portrait rights, or copyright, or that is violent, discriminatory, or illegal, is prohibited. Violating posts will be removed by channel admins, and repeat offenders may have their access restricted.
                 </p>
               </div>
               <button
