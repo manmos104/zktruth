@@ -2872,7 +2872,7 @@ export default function Home() {
                     boxShadow: '0 4px 18px rgba(0,152,234,0.32)',
                   }}
                 >
-                  {shortTonAddr ? `WALLET :: ${shortTonAddr}` : 'LINK GRAM WALLET'}
+                  {shortTonAddr ? `SIGNER :: ${shortTonAddr}` : 'SIGN THIS HASH'}
                 </button>
 
                 {/* Placeholder mint button — routes into the existing
