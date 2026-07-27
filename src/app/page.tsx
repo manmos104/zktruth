@@ -2905,13 +2905,23 @@ export default function Home() {
         const ctx = canvas.getContext('2d');
         ctx?.drawImage(img, 0, 0);
       }
+      // Downsample-then-upsample blur. Instead of relying on
+      // `ctx.filter = 'blur(...)'` — which iOS Safari (both in
+      // Telegram's WebView and standalone) frequently fails to apply
+      // even on in-DOM canvases — we shrink the image to ~5% of its
+      // original size, then paint that tiny copy back up to full size
+      // during each brush stroke. The browser's built-in bilinear
+      // upsampling produces a soft, uniform blur that reads exactly
+      // like a Gaussian blur to the eye and works on every engine.
       const blurred = document.createElement('canvas');
-      blurred.width = naturalW;
-      blurred.height = naturalH;
+      const blurScale = 0.05;
+      blurred.width = Math.max(1, Math.floor(naturalW * blurScale));
+      blurred.height = Math.max(1, Math.floor(naturalH * blurScale));
       const bCtx = blurred.getContext('2d');
       if (bCtx) {
-        bCtx.filter = 'blur(24px)';
-        bCtx.drawImage(img, 0, 0);
+        bCtx.imageSmoothingEnabled = true;
+        bCtx.imageSmoothingQuality = 'high';
+        bCtx.drawImage(img, 0, 0, blurred.width, blurred.height);
       }
       blurredSourceRef.current = blurred;
       setBlurDirty(false);
@@ -2928,8 +2938,8 @@ export default function Home() {
 
   const paintBlurAt = useCallback((clientX: number, clientY: number) => {
     const canvas = blurCanvasRef.current;
-    const original = blurOriginalRef.current;
-    if (!canvas || !original) return;
+    const blurred = blurredSourceRef.current;
+    if (!canvas || !blurred) return;
     const rect = canvas.getBoundingClientRect();
     if (rect.width === 0 || rect.height === 0) return;
     const scaleX = canvas.width / rect.width;
@@ -2941,18 +2951,17 @@ export default function Home() {
     // Brush size scales with image so the felt size is consistent
     // across portrait vs landscape captures.
     const radius = Math.max(canvas.width, canvas.height) * 0.055;
-    // Apply blur directly on the visible canvas — iOS Safari has a
-    // long-standing bug where `ctx.filter = 'blur(...)'` silently
-    // does nothing on offscreen (detached) canvases, so pre-baking
-    // a blurred source and clip-copying from it produced no visible
-    // change. Running the filter here, on the in-DOM canvas, is
-    // reliable on every browser we target.
+    // Clip a circle at the brush position, then paint the tiny
+    // downsampled canvas back up to full resolution inside that
+    // circle. The upscale is bilinear (via imageSmoothing) so the
+    // result is a soft, uniform blur.
     ctx.save();
     ctx.beginPath();
     ctx.arc(x, y, radius, 0, Math.PI * 2);
     ctx.clip();
-    ctx.filter = 'blur(20px)';
-    ctx.drawImage(original, 0, 0);
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = 'high';
+    ctx.drawImage(blurred, 0, 0, canvas.width, canvas.height);
     ctx.restore();
   }, []);
 
@@ -3533,30 +3542,11 @@ export default function Home() {
                   </div>
                 )}
 
-                <button
-                  type="button"
-                  onClick={(e) => { e.stopPropagation(); setReplayOpen(false); setBlurMode(false); }}
-                  aria-label="Close preview"
-                  style={{
-                    position: 'absolute',
-                    top: 14,
-                    right: 14,
-                    width: 44,
-                    height: 44,
-                    borderRadius: 22,
-                    background: 'rgba(255,255,255,0.95)',
-                    color: '#111',
-                    border: 'none',
-                    fontFamily: 'Space Mono, monospace',
-                    fontSize: 18,
-                    fontWeight: 700,
-                    cursor: 'pointer',
-                    boxShadow: '0 4px 18px rgba(0,0,0,0.4)',
-                    zIndex: 2,
-                  }}
-                >
-                  ✕
-                </button>
+                {/* Top-right ✕ removed per user request. Dismissal is
+                    handled by the Telegram system back arrow (see
+                    useTelegramBackButton — it closes the replay modal
+                    first before returning to the verify screen) and
+                    by tapping the backdrop when not in BLUR mode. */}
               </div>
             )}
           </div>
