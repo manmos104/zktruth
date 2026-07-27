@@ -208,6 +208,125 @@ canvas { display: none; }
   z-index: 5;
   pointer-events: none;
 }
+/* Full-screen posting overlay — a dim backdrop with a rotating
+   diamond ring and progress text. Renders while the SHARE flow is
+   awaiting the Telegram Bot API. Blocks pointer events so a jittery
+   user can't spam-submit while the request is in flight. */
+.posting-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 8, 20, 0.75);
+  backdrop-filter: blur(8px);
+  z-index: 10001;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-direction: column;
+  gap: 20px;
+  animation: postingFadeIn 0.2s ease-out;
+}
+@keyframes postingFadeIn {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+.posting-spinner {
+  width: 72px;
+  height: 72px;
+  border-radius: 50%;
+  border: 3px solid rgba(0, 152, 234, 0.15);
+  border-top-color: #0098ea;
+  border-right-color: #0098ea;
+  animation: postingSpin 0.9s linear infinite;
+  box-shadow: 0 0 30px rgba(0, 152, 234, 0.35);
+}
+@keyframes postingSpin {
+  from { transform: rotate(0deg); }
+  to   { transform: rotate(360deg); }
+}
+.posting-label {
+  color: #d8ecff;
+  font-family: 'Space Mono', monospace;
+  font-weight: 700;
+  font-size: 12px;
+  letter-spacing: 3px;
+  text-transform: uppercase;
+  animation: postingPulse 1.2s ease-in-out infinite;
+}
+@keyframes postingPulse {
+  0%, 100% { opacity: 0.55; }
+  50%      { opacity: 1; }
+}
+.posting-sub {
+  color: rgba(255, 255, 255, 0.4);
+  font-family: 'Space Mono', monospace;
+  font-size: 10px;
+  letter-spacing: 1px;
+  margin-top: -8px;
+}
+
+/* Success burst overlay — pops on top of the posting spinner the
+   instant the Bot API confirms the post landed. Uses a bright green
+   check inside a soft glow so the eye is drawn to it before the tab
+   swap fires. */
+.posting-success {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 8, 20, 0.85);
+  backdrop-filter: blur(10px);
+  z-index: 10002;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-direction: column;
+  gap: 16px;
+  animation: successFadeIn 0.25s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+@keyframes successFadeIn {
+  from { opacity: 0; transform: scale(0.9); }
+  to   { opacity: 1; transform: scale(1); }
+}
+.posting-success-check {
+  width: 120px;
+  height: 120px;
+  border-radius: 50%;
+  background: rgba(0, 255, 135, 0.12);
+  border: 3px solid #00ff87;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 0 60px rgba(0, 255, 135, 0.55);
+  animation: successPop 0.4s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+@keyframes successPop {
+  0%   { transform: scale(0); opacity: 0; }
+  60%  { transform: scale(1.2); opacity: 1; }
+  100% { transform: scale(1); opacity: 1; }
+}
+.posting-success-check svg {
+  width: 60px;
+  height: 60px;
+  stroke: #00ff87;
+  stroke-width: 4;
+  fill: none;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-dasharray: 60;
+  stroke-dashoffset: 60;
+  animation: successDraw 0.5s 0.15s ease-out forwards;
+}
+@keyframes successDraw {
+  to { stroke-dashoffset: 0; }
+}
+.posting-success-label {
+  color: #00ff87;
+  font-family: 'Space Mono', monospace;
+  font-weight: 800;
+  font-size: 14px;
+  letter-spacing: 4px;
+  text-transform: uppercase;
+  text-shadow: 0 0 20px rgba(0, 255, 135, 0.6);
+}
+
 .meta-line {
   font-size: 11px;
   color: var(--accent);
@@ -1537,6 +1656,15 @@ export default function Home() {
   // attached to the share sheet, whether text landed on the clipboard,
   // or whether we fell through to the download fallback.
   const [shareStatus, setShareStatus] = useState("");
+  // In-flight indicator for the share/post-to-channel flow. Drives the
+  // full-screen overlay + button spinner so the user gets visible
+  // feedback that something is happening — a small toast alone was
+  // too easy to miss.
+  const [sharing, setSharing] = useState(false);
+  // Success state — briefly renders a big green check overlay right
+  // after a successful post so the outcome reads as "done!" rather
+  // than just the toast fading out.
+  const [shareSuccess, setShareSuccess] = useState(false);
   // On-screen recorder diagnostics for debugging audio capture on devices
   // where we don't have access to a JS console (e.g., iPhone Safari).
   const [recordDebug, setRecordDebug] = useState<string>("");
@@ -2535,6 +2663,7 @@ export default function Home() {
       return
     }
 
+    setSharing(true)
     setShareStatus('チャンネルへ投稿中...')
 
     const metadata = {
@@ -2558,19 +2687,30 @@ export default function Home() {
         detail?: string
       }
       if (!res.ok || !data.ok) {
+        setSharing(false)
         const msg = data.detail || data.error || `投稿失敗 (${res.status})`
         setShareStatus(`失敗: ${msg}`)
         setTimeout(() => setShareStatus(''), 6000)
         return
       }
+      // Full-screen success burst — swap the "posting..." overlay for
+      // a green check that stays for ~1.5s so the outcome reads as a
+      // definite "done!" moment. After that the toast + auto-open
+      // handle the actual navigation.
+      setSharing(false)
+      setShareSuccess(true)
       setShareStatus('投稿完了! チャンネルを開きます...')
+      setTimeout(() => setShareSuccess(false), 1600)
       setTimeout(() => setShareStatus(''), 4000)
       if (data.post_url) {
-        // Open the resulting Telegram post so the user can verify it
-        // landed correctly and grab the URL to cross-post if they want.
-        window.open(data.post_url, '_blank')
+        // Delay the tab-open slightly so the success animation is seen
+        // before iOS Safari steals focus.
+        setTimeout(() => {
+          window.open(data.post_url, '_blank')
+        }, 900)
       }
     } catch (e) {
+      setSharing(false)
       setShareStatus(`ネットワークエラー: ${(e as Error).message}`)
       setTimeout(() => setShareStatus(''), 6000)
     }
@@ -2866,15 +3006,22 @@ export default function Home() {
                   type="button"
                   className="wid-verify-btn"
                   onClick={handleShareWithImage}
+                  disabled={sharing}
                   style={{
                     marginTop: 10,
                     background: '#0098ea',
                     backgroundImage: 'none',
                     color: '#fff',
                     boxShadow: '0 4px 18px rgba(0,152,234,0.32)',
+                    opacity: sharing ? 0.6 : 1,
+                    cursor: sharing ? 'wait' : 'pointer',
                   }}
                 >
-                  {shortTonAddr ? `SIGN AS :: ${shortTonAddr}` : 'SIGN THIS HASH'}
+                  {sharing
+                    ? 'POSTING...'
+                    : shortTonAddr
+                      ? `SIGN AS :: ${shortTonAddr}`
+                      : 'SIGN THIS HASH'}
                 </button>
 
                 {/* Placeholder mint button — routes into the existing
@@ -3160,6 +3307,32 @@ export default function Home() {
                 <div className="sns-copy-status">{copyStatus}</div>
               </div>
             </div>
+          </div>
+        )}
+
+        {/* Full-screen posting spinner overlay. Blocks input, shows a
+            spinning ring + progress label so the user has an
+            unambiguous "something is happening" signal beyond just
+            the small toast at the top of the screen. */}
+        {sharing && (
+          <div className="posting-overlay">
+            <div className="posting-spinner" />
+            <div className="posting-label">POSTING TO CHANNEL</div>
+            <div className="posting-sub">@zktruth_capture · Telegram</div>
+          </div>
+        )}
+
+        {/* Success burst — replaces the spinner overlay for ~1.5s
+            after the Bot API confirms the post landed, then fades
+            out just as the target tab opens. */}
+        {shareSuccess && (
+          <div className="posting-success">
+            <div className="posting-success-check">
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M4 12l5 5L20 6" />
+              </svg>
+            </div>
+            <div className="posting-success-label">POSTED</div>
           </div>
         )}
 
