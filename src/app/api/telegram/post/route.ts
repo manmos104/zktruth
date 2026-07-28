@@ -115,30 +115,39 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     }
   }
 
-  const isVideo = (media.type || '').startsWith('video/')
-  // sendVideo silently rejects (or attaches without inline playback)
-  // anything that isn't MP4 — Telegram Bot API only guarantees inline
-  // video preview for `video/mp4`. Our captures come off iOS Safari's
-  // MediaRecorder as `video/webm;codecs=vp9,opus` in most cases,
-  // which sendVideo will refuse. Route webm and other non-MP4 videos
-  // through sendDocument, which produces a playable inline preview
-  // in Telegram (an inline "attached file" card) and works for any
-  // container. sendPhoto stays as-is because iOS gives us JPEG.
+  // Detect video by BOTH MIME type and filename extension — iOS Safari
+  // sometimes strips the MIME on multipart-uploaded Blobs so we can't
+  // rely on media.type alone.
   const mimeType = (media.type || '').toLowerCase()
-  const isMp4Video = isVideo && (mimeType.includes('mp4') || mimeType.includes('quicktime'))
-  const useSendVideo = isMp4Video
-  const useSendDocument = isVideo && !isMp4Video
-  const method = useSendVideo ? 'sendVideo' : useSendDocument ? 'sendDocument' : 'sendPhoto'
-  const fileField = useSendVideo ? 'video' : useSendDocument ? 'document' : 'photo'
+  const filenameLower = (media.name || '').toLowerCase()
+  const looksLikeVideoByMime = mimeType.startsWith('video/')
+  const looksLikeVideoByName =
+    filenameLower.endsWith('.mp4') ||
+    filenameLower.endsWith('.webm') ||
+    filenameLower.endsWith('.mov') ||
+    filenameLower.endsWith('.m4v')
+  const isVideo = looksLikeVideoByMime || looksLikeVideoByName
+
+  // For videos we ALWAYS use sendDocument regardless of container:
+  //  - sendVideo only guarantees inline playback for MP4 with H.264,
+  //    and even MP4 uploads sometimes get rejected/silently dropped
+  //    when the server can't infer the codec fast enough.
+  //  - sendDocument accepts every container Telegram knows about and
+  //    still renders a tappable inline preview + a thumbnail on
+  //    modern clients, which is the outcome the user actually cares
+  //    about ("the video shows up in the channel").
+  // Photos stay on sendPhoto — Telegram never mishandles JPEG uploads.
+  const useSendDocument = isVideo
+  const method = useSendDocument ? 'sendDocument' : 'sendPhoto'
+  const fileField = useSendDocument ? 'document' : 'photo'
 
   // Pick a sensible filename with the right extension so Telegram's
-  // client detects and previews the file correctly. Some Telegram
-  // clients decide the preview UI purely from the extension.
+  // client detects the file type correctly — some clients decide the
+  // preview UI purely from the extension.
   let uploadName = media.name
   if (!uploadName) {
-    if (useSendVideo) uploadName = 'capture.mp4'
-    else if (useSendDocument) {
-      uploadName = mimeType.includes('webm') ? 'capture.webm' : 'capture.mov'
+    if (useSendDocument) {
+      uploadName = mimeType.includes('mp4') ? 'capture.mp4' : 'capture.webm'
     } else uploadName = 'capture.jpg'
   }
 
@@ -147,15 +156,9 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   tgForm.set(fileField, media, uploadName)
   tgForm.set('caption', buildCaption(meta))
   tgForm.set('parse_mode', 'HTML')
-  if (useSendVideo) {
-    // Ask Telegram to enable streaming playback + generate a preview
-    // thumbnail. Cheap to include and makes MP4 videos render inline.
-    tgForm.set('supports_streaming', 'true')
-  }
   if (useSendDocument) {
-    // Documents can be posted with a hidden filename display so the
-    // caption + inline preview stay clean. Telegram will still render
-    // an in-line video player for the .webm document on most clients.
+    // Let Telegram sniff the content type so it renders a native
+    // video player for the file rather than a generic download card.
     tgForm.set('disable_content_type_detection', 'false')
   }
 
@@ -190,11 +193,9 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   // Pull the file_id from whichever field Telegram populated for the
   // method we used. Photos come back as an array of sizes (pick the
   // largest); videos and documents each have a single file_id.
-  const fileId = useSendVideo
-    ? tgData.result.video?.file_id
-    : useSendDocument
-      ? tgData.result.document?.file_id
-      : tgData.result.photo?.[tgData.result.photo.length - 1]?.file_id
+  const fileId = useSendDocument
+    ? tgData.result.document?.file_id
+    : tgData.result.photo?.[tgData.result.photo.length - 1]?.file_id
 
   const channelPath = CHANNEL_ID.startsWith('@')
     ? CHANNEL_ID.slice(1)

@@ -2810,9 +2810,16 @@ export default function Home() {
     let mediaBlob: Blob | null = null
     let mediaName = 'capture.jpg'
     if (capturedVideo) {
-      mediaBlob = capturedVideo
       const ext = capturedVideo.type.includes('mp4') ? 'mp4' : 'webm'
       mediaName = `zktruth-proof.${ext}`
+      // Re-wrap the recorded Blob in an explicit File with the
+      // preserved MIME type. FormData.set(blob) can strip the type
+      // in some iOS Safari builds, leaving the server unable to
+      // detect video vs photo. Using File() locks in the type and
+      // filename together so the server sees both.
+      mediaBlob = new File([capturedVideo], mediaName, {
+        type: capturedVideo.type || (ext === 'mp4' ? 'video/mp4' : 'video/webm'),
+      })
     } else if (capturedImage) {
       const parts = capturedImage.split(',')
       const mime = parts[0].match(/:(.*?);/)?.[1] || 'image/jpeg'
@@ -3286,6 +3293,14 @@ export default function Home() {
                       // captureMode-based default inside startCamera
                       // would still see 'photo'.
                       await startCamera(facingMode, { audio: true });
+                      // Re-apply the ultra-wide (0.5x) lens switch so
+                      // VIDEO mode framing matches PHOTO mode framing.
+                      // startCamera resets to the default wide lens,
+                      // which is narrower than the ultra-wide the
+                      // camera initially opened with — without this
+                      // call the video ended up more cropped than the
+                      // corresponding photo would have been.
+                      await handleZoom(0.5);
                     }
                   }}
                 >VIDEO</button>
