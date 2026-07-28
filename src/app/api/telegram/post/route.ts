@@ -39,6 +39,8 @@ interface TelegramSendResponse {
     message_id: number
     photo?: Array<{ file_id: string; width: number; height: number }>
     video?: { file_id: string }
+    document?: { file_id: string }
+    animation?: { file_id: string }
   }
 }
 
@@ -114,19 +116,48 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   }
 
   const isVideo = (media.type || '').startsWith('video/')
-  // Telegram's sendVideo endpoint tops out at 50 MB via direct upload;
-  // sendPhoto at 10 MB. Anything larger would need chunked upload
-  // (documents) which we don't handle yet.
-  const method = isVideo ? 'sendVideo' : 'sendPhoto'
-  const fileField = isVideo ? 'video' : 'photo'
+  // sendVideo silently rejects (or attaches without inline playback)
+  // anything that isn't MP4 — Telegram Bot API only guarantees inline
+  // video preview for `video/mp4`. Our captures come off iOS Safari's
+  // MediaRecorder as `video/webm;codecs=vp9,opus` in most cases,
+  // which sendVideo will refuse. Route webm and other non-MP4 videos
+  // through sendDocument, which produces a playable inline preview
+  // in Telegram (an inline "attached file" card) and works for any
+  // container. sendPhoto stays as-is because iOS gives us JPEG.
+  const mimeType = (media.type || '').toLowerCase()
+  const isMp4Video = isVideo && (mimeType.includes('mp4') || mimeType.includes('quicktime'))
+  const useSendVideo = isMp4Video
+  const useSendDocument = isVideo && !isMp4Video
+  const method = useSendVideo ? 'sendVideo' : useSendDocument ? 'sendDocument' : 'sendPhoto'
+  const fileField = useSendVideo ? 'video' : useSendDocument ? 'document' : 'photo'
+
+  // Pick a sensible filename with the right extension so Telegram's
+  // client detects and previews the file correctly. Some Telegram
+  // clients decide the preview UI purely from the extension.
+  let uploadName = media.name
+  if (!uploadName) {
+    if (useSendVideo) uploadName = 'capture.mp4'
+    else if (useSendDocument) {
+      uploadName = mimeType.includes('webm') ? 'capture.webm' : 'capture.mov'
+    } else uploadName = 'capture.jpg'
+  }
 
   const tgForm = new FormData()
   tgForm.set('chat_id', CHANNEL_ID)
-  tgForm.set(fileField, media, media.name || (isVideo ? 'capture.mp4' : 'capture.jpg'))
+  tgForm.set(fileField, media, uploadName)
   tgForm.set('caption', buildCaption(meta))
   tgForm.set('parse_mode', 'HTML')
-  // Enable the built-in Telegram "protect content" toggle? Left off
-  // deliberately so viewers can forward the proof onwards.
+  if (useSendVideo) {
+    // Ask Telegram to enable streaming playback + generate a preview
+    // thumbnail. Cheap to include and makes MP4 videos render inline.
+    tgForm.set('supports_streaming', 'true')
+  }
+  if (useSendDocument) {
+    // Documents can be posted with a hidden filename display so the
+    // caption + inline preview stay clean. Telegram will still render
+    // an in-line video player for the .webm document on most clients.
+    tgForm.set('disable_content_type_detection', 'false')
+  }
 
   let tgRes: Response
   try {
@@ -148,18 +179,22 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
         ok: false,
         error: 'telegram rejected the post',
         detail: tgData?.description ?? `HTTP ${tgRes.status}`,
+        used_method: method,
+        mime: mimeType,
       },
       { status: 502 },
     )
   }
 
   const messageId = tgData.result.message_id
-  // For photos, Telegram returns an array of increasingly-large sizes —
-  // pick the largest one so downstream consumers get the full-res
-  // file_id.
-  const fileId = isVideo
+  // Pull the file_id from whichever field Telegram populated for the
+  // method we used. Photos come back as an array of sizes (pick the
+  // largest); videos and documents each have a single file_id.
+  const fileId = useSendVideo
     ? tgData.result.video?.file_id
-    : tgData.result.photo?.[tgData.result.photo.length - 1]?.file_id
+    : useSendDocument
+      ? tgData.result.document?.file_id
+      : tgData.result.photo?.[tgData.result.photo.length - 1]?.file_id
 
   const channelPath = CHANNEL_ID.startsWith('@')
     ? CHANNEL_ID.slice(1)
