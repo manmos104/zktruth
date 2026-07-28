@@ -2796,16 +2796,29 @@ export default function Home() {
   }, [proofData, gpsLocation]);
 
   const handleShareWithImage = useCallback(async () => {
-    // Post the capture to the public zkTruth Telegram channel via our
-    // Bot API relay. This is the new "canonical share" path — the
-    // Telegram post itself becomes the shareable proof URL, and the
-    // media lives on Telegram's CDN so we don't pay for storage or
-    // bandwidth. No more iOS Web Share juggling, no X compose quirks.
+    // Post the capture to the public zkTruth Telegram channel.
     //
-    // The old X/Twitter share-sheet dance (canShare + files + text)
-    // was removed on 2026-07-25 as part of the TON pivot. If the user
-    // wants to cross-post to X after the fact they can grab the
-    // Telegram post URL from the toast and paste it into their tweet.
+    // We POST **directly** to `api.telegram.org/bot<TOKEN>/...` from
+    // the client instead of round-tripping through our own
+    // `/api/telegram/post` Vercel Function. Reason: Vercel
+    // Serverless Functions cap the request body at 4.5 MB on the
+    // Hobby plan, and any video longer than ~13 seconds at our
+    // recording bitrate blows through that limit — the upload gets
+    // rejected before it ever reaches the function, so the channel
+    // stays empty and the user sees nothing.
+    //
+    // Talking to Telegram directly means the only ceiling is the
+    // Bot API's own 50 MB per-file limit, which is plenty for
+    // capture-length clips.
+    //
+    // Trade-off: the bot token is exposed in the client bundle
+    // (NEXT_PUBLIC_TELEGRAM_BOT_TOKEN). The bot has post-only
+    // permission on a single public channel, so worst-case abuse is
+    // a spam post that admins can delete + a `/revoke` in BotFather
+    // to rotate the token. Acceptable for the MVP; can be moved
+    // back behind a server proxy once we're on a Vercel plan with
+    // larger body limits or once we cache captures in Vercel Blob
+    // and pass URLs to Telegram instead of raw uploads.
 
     let mediaBlob: Blob | null = null
     let mediaName = 'capture.jpg'
@@ -2839,53 +2852,110 @@ export default function Home() {
     setSharing(true)
     setShareStatus('チャンネルへ投稿中...')
 
-    const metadata = {
-      hash: proofData?.hash,
-      timestamp: proofData?.timestamp,
-      // Skip GPS entirely when the user has toggled it off — never
-      // let stale "GPS OFF" placeholders sneak into the caption.
-      gps: gpsEnabled
-        ? gpsLocation || (gpsCoords && !gpsCoords.startsWith('Acquiring') && gpsCoords !== 'GPS OFF' && gpsCoords !== 'GPS unavailable' && gpsCoords !== 'GPS not supported' ? gpsCoords : undefined)
-        : undefined,
-      wallet: tonWallet?.account.address,
-      comment: captureComment?.trim() || undefined,
+    const BOT_TOKEN = process.env.NEXT_PUBLIC_TELEGRAM_BOT_TOKEN
+    const CHANNEL_ID = process.env.NEXT_PUBLIC_TELEGRAM_CHANNEL_ID || '@zktruth_capture'
+    if (!BOT_TOKEN) {
+      setSharing(false)
+      setShareStatus('Bot token env not set — see README')
+      setTimeout(() => setShareStatus(''), 6000)
+      return
     }
 
-    const form = new FormData()
-    form.set('media', mediaBlob, mediaName)
-    form.set('metadata', JSON.stringify(metadata))
+    // Build the caption client-side (previously done in the server
+    // route). Same HTML formatting + zkTruth footer + optional
+    // wallet/comment/location fields.
+    const shortHash = (h?: string) => {
+      if (!h) return ''
+      const clean = h.replace(/^0x/, '')
+      return `0x${clean.slice(0, 8)}…${clean.slice(-6)}`
+    }
+    const gpsForCaption = gpsEnabled
+      ? gpsLocation ||
+        (gpsCoords &&
+        !gpsCoords.startsWith('Acquiring') &&
+        gpsCoords !== 'GPS OFF' &&
+        gpsCoords !== 'GPS unavailable' &&
+        gpsCoords !== 'GPS not supported'
+          ? gpsCoords
+          : undefined)
+      : undefined
+    const captionLines: string[] = ['✓ <b>Verified Proof of Capture</b>', '']
+    if (proofData?.hash) {
+      captionLines.push(`<b>Hash</b> · <code>${shortHash(proofData.hash)}</code>`)
+    }
+    if (proofData?.timestamp) {
+      const t = proofData.timestamp
+        .replace('T', ' ')
+        .replace(/\.\d+/, '')
+        .replace('Z', ' UTC')
+      captionLines.push(`<b>Time</b> · ${t}`)
+    }
+    if (gpsForCaption) {
+      captionLines.push(`<b>Location</b> · ${gpsForCaption}`)
+    }
+    if (tonWallet?.account.address) {
+      captionLines.push(`<b>Wallet</b> · <code>${shortHash(tonWallet.account.address)}</code>`)
+    }
+    const trimmedComment = captureComment?.trim()
+    if (trimmedComment) {
+      captionLines.push('', `<i>${trimmedComment}</i>`)
+    }
+    captionLines.push(
+      '',
+      'Captured with <a href="https://zktruth.vercel.app">zkTruth</a> · Proof of Capture on TON.',
+    )
+    const caption = captionLines.join('\n')
+
+    // Videos always go through sendDocument — sendVideo silently
+    // rejects non-MP4/H.264, and iOS Safari MediaRecorder produces
+    // webm/vp9/opus. sendDocument accepts every container and
+    // Telegram clients still render an inline video player.
+    const isVideo =
+      (mediaBlob.type || '').startsWith('video/') ||
+      /\.(mp4|webm|mov|m4v)$/i.test(mediaName)
+    const tgMethod = isVideo ? 'sendDocument' : 'sendPhoto'
+    const tgFileField = isVideo ? 'document' : 'photo'
+
+    const tgForm = new FormData()
+    tgForm.set('chat_id', CHANNEL_ID)
+    tgForm.set(tgFileField, mediaBlob, mediaName)
+    tgForm.set('caption', caption)
+    tgForm.set('parse_mode', 'HTML')
+    if (isVideo) {
+      tgForm.set('disable_content_type_detection', 'false')
+    }
 
     try {
-      const res = await fetch('/api/telegram/post', { method: 'POST', body: form })
+      const res = await fetch(
+        `https://api.telegram.org/bot${BOT_TOKEN}/${tgMethod}`,
+        { method: 'POST', body: tgForm },
+      )
       const data = (await res.json().catch(() => ({}))) as {
         ok?: boolean
-        post_url?: string
-        error?: string
-        detail?: string
+        description?: string
+        result?: { message_id: number }
       }
-      if (!res.ok || !data.ok) {
+      if (!res.ok || !data.ok || !data.result) {
         setSharing(false)
-        const msg = data.detail || data.error || `投稿失敗 (${res.status})`
+        const msg = data.description || `HTTP ${res.status}`
         setShareStatus(`失敗: ${msg}`)
         setTimeout(() => setShareStatus(''), 6000)
         return
       }
+      const messageId = data.result.message_id
+      const channelPath = CHANNEL_ID.startsWith('@') ? CHANNEL_ID.slice(1) : CHANNEL_ID
+      const postUrl = `https://t.me/${channelPath}/${messageId}`
       // Full-screen success burst — swap the "posting..." overlay for
       // a green check that stays for ~1.5s so the outcome reads as a
-      // definite "done!" moment. After that the toast + auto-open
-      // handle the actual navigation.
+      // definite "done!" moment.
       setSharing(false)
       setShareSuccess(true)
       setShareStatus('投稿完了! チャンネルを開きます...')
       setTimeout(() => setShareSuccess(false), 1600)
       setTimeout(() => setShareStatus(''), 4000)
-      if (data.post_url) {
-        // Delay the tab-open slightly so the success animation is seen
-        // before iOS Safari steals focus.
-        setTimeout(() => {
-          window.open(data.post_url, '_blank')
-        }, 900)
-      }
+      setTimeout(() => {
+        window.open(postUrl, '_blank')
+      }, 900)
     } catch (e) {
       setSharing(false)
       setShareStatus(`ネットワークエラー: ${(e as Error).message}`)
