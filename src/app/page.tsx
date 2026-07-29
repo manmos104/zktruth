@@ -2456,7 +2456,12 @@ export default function Home() {
     }
   }, [capturing, cameraReady, gpsCoords]);
 
-  const MAX_REC = 180;
+  // Recording hard-stop. Chosen so a full-length clip at the current
+  // bitrate (3 Mbps video + 192 kbps audio ≈ 400 KB/s) stays under
+  // Telegram Bot API's 50 MB per-file upload cap. 90s × 400 KB ≈
+  // 35 MB — enough head-room to swallow bitrate spikes during
+  // motion-heavy scenes without tripping the 50 MB ceiling.
+  const MAX_REC = 90;
 
   const handleVideoCapture = useCallback(() => {
     if (recording) {
@@ -2629,14 +2634,16 @@ export default function Home() {
         // the audio track silently when the encoder isn't told to budget
         // for it; setting `audioBitsPerSecond` forces the encoder to
         // allocate space for the mic stream.
-        // Quality bumped: 2.5 Mbps → 6 Mbps video, 128 → 192 kbps
-        // audio. At 6 Mbps a 30-second clip is ~23 MB — well under
-        // Telegram Bot API's 50 MB per-file ceiling, so we buy real
-        // sharpness without risking rejection. Audio bump gives
-        // noticeably cleaner voice/ambient sound in the recording.
+        // Trade-off tuning: 3 Mbps video + 192 kbps audio ≈ 400 KB/s.
+        // At that data rate a 90-second clip weighs ~35 MB, safely
+        // under Telegram Bot API's 50 MB per-file limit. Previous
+        // 6 Mbps setting maxed out at ~66 seconds before the upload
+        // got rejected, which surprised users. 3 Mbps still reads
+        // as sharp 1080p (YouTube's recommended 1080p bitrate) and
+        // lets us keep a comfortable 90-second recording window.
         const recorderOpts: MediaRecorderOptions = selectedMime
-          ? { mimeType: selectedMime, audioBitsPerSecond: 192000, videoBitsPerSecond: 6_000_000 }
-          : { audioBitsPerSecond: 192000, videoBitsPerSecond: 6_000_000 }
+          ? { mimeType: selectedMime, audioBitsPerSecond: 192000, videoBitsPerSecond: 3_000_000 }
+          : { audioBitsPerSecond: 192000, videoBitsPerSecond: 3_000_000 }
         const recorder = new MediaRecorder(recordStream, recorderOpts);
         recorder.ondataavailable = (e) => {
           if (e.data.size > 0) recordedChunksRef.current.push(e.data);
