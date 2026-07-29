@@ -3422,28 +3422,36 @@ export default function Home() {
                     const currentStream = streamRef.current;
                     const hasAudio = currentStream?.getAudioTracks().length ?? 0;
                     if (!hasAudio) {
-                      // Re-init the camera stream to include audio
-                      // AND the same wide-angle lens configuration
-                      // the user was already seeing in PHOTO mode.
-                      // We do this inline instead of calling
-                      // handleZoom afterwards because handleZoom's
-                      // internal startCamera call would strip the
-                      // audio flag (its useCallback closure captured
-                      // captureMode='photo').
+                      // Reinitialise the stream with audio, then
+                      // apply the SAME lens/zoom pipeline that the
+                      // initial mount uses so the FOV matches PHOTO
+                      // mode exactly. Previously we jumped straight
+                      // to the discrete ultra-wide device, but on
+                      // iOS 17+ the composite "Back Camera" honours
+                      // `applyConstraints({ zoom: min })` which
+                      // gives a slightly wider crop than the
+                      // discrete Ultra Wide device — that's the
+                      // FOV the user was seeing in PHOTO mode.
                       if (facingMode === 'user') {
-                        // Front camera: 4:3 aspect ratio pulls a
-                        // wider crop out of the single front lens on
-                        // iPhone — matching what PHOTO mode uses.
                         await startCamera('user', { frontWide: true, audio: true });
                       } else {
-                        // Back camera: first request the composite
-                        // "Back Camera" then swap to the ultra-wide
-                        // device if the phone exposes one.
                         await startCamera('environment', { audio: true });
-                        const uwId = await findBackCameraDeviceId('ultrawide');
-                        if (uwId) {
-                          await startCamera('environment', { deviceId: uwId, audio: true });
-                          setIsUltraWide(true);
+                        const track = streamRef.current?.getVideoTracks()[0];
+                        const caps = (track as unknown as { getCapabilities?: () => { zoom?: { min?: number } } })?.getCapabilities?.();
+                        let usedZoomConstraint = false;
+                        if (track && caps?.zoom && (caps.zoom.min ?? 1) < 1) {
+                          try {
+                            await (track as unknown as { applyConstraints: (c: unknown) => Promise<void> })
+                              .applyConstraints({ advanced: [{ zoom: caps.zoom.min }] });
+                            usedZoomConstraint = true;
+                          } catch { /* fall through to ultrawide device swap */ }
+                        }
+                        if (!usedZoomConstraint) {
+                          const uwId = await findBackCameraDeviceId('ultrawide');
+                          if (uwId) {
+                            await startCamera('environment', { deviceId: uwId, audio: true });
+                            setIsUltraWide(true);
+                          }
                         }
                       }
                     }
