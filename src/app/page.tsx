@@ -2488,13 +2488,15 @@ export default function Home() {
       setCapturedVideo(null);
 
       const v = videoRef.current;
-      // Recording canvas resolution — bumped from 1080x1920 to
-      // 1440x2560 (QHD portrait) so the encoded video preserves
-      // sensor detail even after the "cover" crop. iOS Safari's
-      // MediaRecorder handles this size fine on modern iPhones and
-      // the extra pixels are the biggest single quality win we can
-      // make without switching encoders.
-      const pw = 1440, ph = 2560;
+      // Recording canvas kept at 1080x1920 (9:16 portrait) to match
+      // the photo capture canvas — using the same output size means
+      // the "cover" crop math produces the same field-of-view for
+      // both media types. A previous bump to 1440x2560 subtly
+      // shifted the video framing on iOS because Safari's MP4
+      // hardware encoder rescaled the input to fit its supported
+      // resolutions, effectively cropping the FOV. Quality still
+      // improves from the raised bitrate (6 Mbps) below.
+      const pw = 1080, ph = 1920;
 
       // Create / reuse the offscreen canvas we draw into.
       if (!recCanvasRef.current) {
