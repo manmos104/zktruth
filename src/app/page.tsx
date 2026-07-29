@@ -2834,16 +2834,20 @@ export default function Home() {
     let mediaBlob: Blob | null = null
     let mediaName = 'capture.jpg'
     if (capturedVideo) {
-      const ext = capturedVideo.type.includes('mp4') ? 'mp4' : 'webm'
+      const rawType = capturedVideo.type || 'video/webm'
+      const ext = rawType.includes('mp4') ? 'mp4' : 'webm'
       mediaName = `zktruth-proof.${ext}`
-      // Re-wrap the recorded Blob in an explicit File with the
-      // preserved MIME type. FormData.set(blob) can strip the type
-      // in some iOS Safari builds, leaving the server unable to
-      // detect video vs photo. Using File() locks in the type and
-      // filename together so the server sees both.
-      mediaBlob = new File([capturedVideo], mediaName, {
-        type: capturedVideo.type || (ext === 'mp4' ? 'video/mp4' : 'video/webm'),
-      })
+      // CRITICAL: strip any codec parameters from the MIME type.
+      // MediaRecorder emits Blobs with types like
+      // "video/webm;codecs=vp9,opus", and when that gets put into a
+      // multipart Content-Type header Telegram's parser sees the
+      // "codecs=" bit and silently drops the file attachment while
+      // still accepting the caption — the exact symptom the user
+      // hit ("metadata posts, video doesn't"). A bare "video/webm"
+      // is the only form Telegram reliably keeps.
+      const cleanType = (rawType.split(';')[0] || '').trim() ||
+        (ext === 'mp4' ? 'video/mp4' : 'video/webm')
+      mediaBlob = new File([capturedVideo], mediaName, { type: cleanType })
     } else if (capturedImage) {
       const parts = capturedImage.split(',')
       const mime = parts[0].match(/:(.*?);/)?.[1] || 'image/jpeg'
@@ -2927,34 +2931,56 @@ export default function Home() {
     const tgMethod = isVideo ? 'sendDocument' : 'sendPhoto'
     const tgFileField = isVideo ? 'document' : 'photo'
 
-    const tgForm = new FormData()
-    tgForm.set('chat_id', CHANNEL_ID)
-    tgForm.set(tgFileField, mediaBlob, mediaName)
-    tgForm.set('caption', caption)
-    tgForm.set('parse_mode', 'HTML')
-    if (isVideo) {
-      tgForm.set('disable_content_type_detection', 'false')
-    }
-
     // Show file size + method up front so if the request never
     // gets a response the user (and we) can see what was attempted.
     const sizeKB = Math.round((mediaBlob.size || 0) / 1024)
     setShareStatus(`投稿中... ${tgMethod} · ${sizeKB} KB`)
 
+    // Uploader helper used for both the primary attempt and the
+    // sendVideo fallback below. Rebuilds the form each time so a
+    // consumed body / stale field state can't sabotage retries.
+    const uploadTo = async (methodName: string, field: string) => {
+      const f = new FormData()
+      f.set('chat_id', CHANNEL_ID)
+      f.set(field, mediaBlob, mediaName)
+      f.set('caption', caption)
+      f.set('parse_mode', 'HTML')
+      if (methodName === 'sendVideo') f.set('supports_streaming', 'true')
+      const r = await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/${methodName}`, {
+        method: 'POST',
+        body: f,
+      })
+      const txt = await r.text()
+      let d: { ok?: boolean; description?: string; result?: { message_id: number; document?: unknown; video?: unknown } } = {}
+      try { d = JSON.parse(txt) } catch { /* keep raw */ }
+      return { r, d, txt }
+    }
+
     try {
-      const res = await fetch(
-        `https://api.telegram.org/bot${BOT_TOKEN}/${tgMethod}`,
-        { method: 'POST', body: tgForm },
-      )
-      const rawText = await res.text()
-      let data: { ok?: boolean; description?: string; result?: { message_id: number } } = {}
-      try { data = JSON.parse(rawText) } catch { /* keep rawText as-is */ }
+      let { r: res, d: data, txt: rawText } = await uploadTo(tgMethod, tgFileField)
+      let usedMethod = tgMethod
+
+      // Fallback: if sendDocument succeeded (200/ok) but Telegram
+      // silently dropped the file (no document field in the result),
+      // retry with sendVideo. Some Telegram server versions accept
+      // sendDocument for webm but strip the attachment; sendVideo
+      // handles it correctly in that case.
+      const documentMissing =
+        res.ok && data.ok && data.result && !data.result.document && !data.result.video
+      if (documentMissing) {
+        const retry = await uploadTo('sendVideo', 'video')
+        res = retry.r
+        data = retry.d
+        rawText = retry.txt
+        usedMethod = 'sendVideo'
+      }
+
       if (!res.ok || !data.ok || !data.result) {
         setSharing(false)
         const msg =
           data.description ||
-          (rawText ? rawText.slice(0, 160) : `HTTP ${res.status}`)
-        setShareStatus(`失敗 [${res.status}]: ${msg}`)
+          (rawText ? rawText.slice(0, 200) : `HTTP ${res.status}`)
+        setShareStatus(`失敗 [${res.status}] ${usedMethod}: ${msg}`)
         setTimeout(() => setShareStatus(''), 10000)
         return
       }
