@@ -2456,12 +2456,12 @@ export default function Home() {
     }
   }, [capturing, cameraReady, gpsCoords]);
 
-  // Recording hard-stop. Chosen so a full-length clip at the current
-  // bitrate (3 Mbps video + 192 kbps audio ≈ 400 KB/s) stays under
-  // Telegram Bot API's 50 MB per-file upload cap. 90s × 400 KB ≈
-  // 35 MB — enough head-room to swallow bitrate spikes during
-  // motion-heavy scenes without tripping the 50 MB ceiling.
-  const MAX_REC = 90;
+  // Recording hard-stop. 60s × ~775 KB/s (6 Mbps video + 192 kbps
+  // audio) ≈ 46 MB — sits under Telegram Bot API's 50 MB upload
+  // ceiling with a few MB of head-room for bitrate spikes on
+  // motion-heavy scenes. Kept short so the user always gets the
+  // full high-bitrate quality without the upload getting rejected.
+  const MAX_REC = 60;
 
   const handleVideoCapture = useCallback(() => {
     if (recording) {
@@ -2634,16 +2634,15 @@ export default function Home() {
         // the audio track silently when the encoder isn't told to budget
         // for it; setting `audioBitsPerSecond` forces the encoder to
         // allocate space for the mic stream.
-        // Trade-off tuning: 3 Mbps video + 192 kbps audio ≈ 400 KB/s.
-        // At that data rate a 90-second clip weighs ~35 MB, safely
-        // under Telegram Bot API's 50 MB per-file limit. Previous
-        // 6 Mbps setting maxed out at ~66 seconds before the upload
-        // got rejected, which surprised users. 3 Mbps still reads
-        // as sharp 1080p (YouTube's recommended 1080p bitrate) and
-        // lets us keep a comfortable 90-second recording window.
+        // 6 Mbps video + 192 kbps audio ≈ 775 KB/s. At that rate a
+        // 60-second clip weighs ~46 MB — right under Telegram Bot
+        // API's 50 MB per-file limit with a small safety margin
+        // for bitrate spikes. Picked quality over length per the
+        // user's preference: reads as sharp 4K-ish 1080p rather
+        // than the muddier 3 Mbps we briefly tried.
         const recorderOpts: MediaRecorderOptions = selectedMime
-          ? { mimeType: selectedMime, audioBitsPerSecond: 192000, videoBitsPerSecond: 3_000_000 }
-          : { audioBitsPerSecond: 192000, videoBitsPerSecond: 3_000_000 }
+          ? { mimeType: selectedMime, audioBitsPerSecond: 192000, videoBitsPerSecond: 6_000_000 }
+          : { audioBitsPerSecond: 192000, videoBitsPerSecond: 6_000_000 }
         const recorder = new MediaRecorder(recordStream, recorderOpts);
         recorder.ondataavailable = (e) => {
           if (e.data.size > 0) recordedChunksRef.current.push(e.data);
