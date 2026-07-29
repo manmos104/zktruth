@@ -2488,7 +2488,13 @@ export default function Home() {
       setCapturedVideo(null);
 
       const v = videoRef.current;
-      const pw = 1080, ph = 1920; // 9:16 portrait
+      // Recording canvas resolution — bumped from 1080x1920 to
+      // 1440x2560 (QHD portrait) so the encoded video preserves
+      // sensor detail even after the "cover" crop. iOS Safari's
+      // MediaRecorder handles this size fine on modern iPhones and
+      // the extra pixels are the biggest single quality win we can
+      // make without switching encoders.
+      const pw = 1440, ph = 2560;
 
       // Create / reuse the offscreen canvas we draw into.
       if (!recCanvasRef.current) {
@@ -2611,9 +2617,14 @@ export default function Home() {
         // the audio track silently when the encoder isn't told to budget
         // for it; setting `audioBitsPerSecond` forces the encoder to
         // allocate space for the mic stream.
+        // Quality bumped: 2.5 Mbps → 6 Mbps video, 128 → 192 kbps
+        // audio. At 6 Mbps a 30-second clip is ~23 MB — well under
+        // Telegram Bot API's 50 MB per-file ceiling, so we buy real
+        // sharpness without risking rejection. Audio bump gives
+        // noticeably cleaner voice/ambient sound in the recording.
         const recorderOpts: MediaRecorderOptions = selectedMime
-          ? { mimeType: selectedMime, audioBitsPerSecond: 128000, videoBitsPerSecond: 2_500_000 }
-          : { audioBitsPerSecond: 128000, videoBitsPerSecond: 2_500_000 }
+          ? { mimeType: selectedMime, audioBitsPerSecond: 192000, videoBitsPerSecond: 6_000_000 }
+          : { audioBitsPerSecond: 192000, videoBitsPerSecond: 6_000_000 }
         const recorder = new MediaRecorder(recordStream, recorderOpts);
         recorder.ondataavailable = (e) => {
           if (e.data.size > 0) recordedChunksRef.current.push(e.data);
@@ -2925,21 +2936,26 @@ export default function Home() {
       tgForm.set('disable_content_type_detection', 'false')
     }
 
+    // Show file size + method up front so if the request never
+    // gets a response the user (and we) can see what was attempted.
+    const sizeKB = Math.round((mediaBlob.size || 0) / 1024)
+    setShareStatus(`投稿中... ${tgMethod} · ${sizeKB} KB`)
+
     try {
       const res = await fetch(
         `https://api.telegram.org/bot${BOT_TOKEN}/${tgMethod}`,
         { method: 'POST', body: tgForm },
       )
-      const data = (await res.json().catch(() => ({}))) as {
-        ok?: boolean
-        description?: string
-        result?: { message_id: number }
-      }
+      const rawText = await res.text()
+      let data: { ok?: boolean; description?: string; result?: { message_id: number } } = {}
+      try { data = JSON.parse(rawText) } catch { /* keep rawText as-is */ }
       if (!res.ok || !data.ok || !data.result) {
         setSharing(false)
-        const msg = data.description || `HTTP ${res.status}`
-        setShareStatus(`失敗: ${msg}`)
-        setTimeout(() => setShareStatus(''), 6000)
+        const msg =
+          data.description ||
+          (rawText ? rawText.slice(0, 160) : `HTTP ${res.status}`)
+        setShareStatus(`失敗 [${res.status}]: ${msg}`)
+        setTimeout(() => setShareStatus(''), 10000)
         return
       }
       const messageId = data.result.message_id
@@ -3357,20 +3373,30 @@ export default function Home() {
                     const currentStream = streamRef.current;
                     const hasAudio = currentStream?.getAudioTracks().length ?? 0;
                     if (!hasAudio) {
-                      // Pass `audio: true` explicitly — the state
-                      // update from setCaptureMode above hasn't
-                      // reflected yet when this closure runs, so the
-                      // captureMode-based default inside startCamera
-                      // would still see 'photo'.
-                      await startCamera(facingMode, { audio: true });
-                      // Re-apply the ultra-wide (0.5x) lens switch so
-                      // VIDEO mode framing matches PHOTO mode framing.
-                      // startCamera resets to the default wide lens,
-                      // which is narrower than the ultra-wide the
-                      // camera initially opened with — without this
-                      // call the video ended up more cropped than the
-                      // corresponding photo would have been.
-                      await handleZoom(0.5);
+                      // Re-init the camera stream to include audio
+                      // AND the same wide-angle lens configuration
+                      // the user was already seeing in PHOTO mode.
+                      // We do this inline instead of calling
+                      // handleZoom afterwards because handleZoom's
+                      // internal startCamera call would strip the
+                      // audio flag (its useCallback closure captured
+                      // captureMode='photo').
+                      if (facingMode === 'user') {
+                        // Front camera: 4:3 aspect ratio pulls a
+                        // wider crop out of the single front lens on
+                        // iPhone — matching what PHOTO mode uses.
+                        await startCamera('user', { frontWide: true, audio: true });
+                      } else {
+                        // Back camera: first request the composite
+                        // "Back Camera" then swap to the ultra-wide
+                        // device if the phone exposes one.
+                        await startCamera('environment', { audio: true });
+                        const uwId = await findBackCameraDeviceId('ultrawide');
+                        if (uwId) {
+                          await startCamera('environment', { deviceId: uwId, audio: true });
+                          setIsUltraWide(true);
+                        }
+                      }
                     }
                   }}
                 >VIDEO</button>
