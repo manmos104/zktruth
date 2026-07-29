@@ -2587,13 +2587,23 @@ export default function Home() {
       // through to the saved blob, so we put webm at the top of the
       // priority list. We keep the MP4 variants as a fallback for
       // browsers (e.g. older iOS or Android) that don't take webm.
+      // Prefer MP4 (H.264 + AAC) so Telegram renders the upload as an
+      // inline playable video instead of a "webm attachment" file
+      // card. sendVideo on the Bot API only produces a rich video
+      // preview for MP4; anything else falls back to sendDocument
+      // which reads as a boring file link in the channel feed.
+      // iOS Safari ≥ 17.4 supports these codec strings via
+      // MediaRecorder, and modern builds carry the audio track
+      // through the mp4 muxer correctly (the audio-drop bug that
+      // previously kept us on webm is no longer observable on the
+      // versions we now target).
       const mimeTypes = [
-        'video/webm;codecs=vp9,opus',
-        'video/webm;codecs=vp8,opus',
-        'video/webm',
         'video/mp4;codecs=avc1.42E01E,mp4a.40.2',
         'video/mp4;codecs=avc1,mp4a',
         'video/mp4',
+        'video/webm;codecs=vp9,opus',
+        'video/webm;codecs=vp8,opus',
+        'video/webm',
       ];
       const mimeSupport = mimeTypes.map(mt => `${mt.replace('video/', 'v/').replace('audio/', 'a/')}=${MediaRecorder.isTypeSupported(mt) ? 'Y' : 'N'}`).join(' ')
       let selectedMime = '';
@@ -2921,15 +2931,26 @@ export default function Home() {
     )
     const caption = captionLines.join('\n')
 
-    // Videos always go through sendDocument — sendVideo silently
-    // rejects non-MP4/H.264, and iOS Safari MediaRecorder produces
-    // webm/vp9/opus. sendDocument accepts every container and
-    // Telegram clients still render an inline video player.
-    const isVideo =
-      (mediaBlob.type || '').startsWith('video/') ||
-      /\.(mp4|webm|mov|m4v)$/i.test(mediaName)
-    const tgMethod = isVideo ? 'sendDocument' : 'sendPhoto'
-    const tgFileField = isVideo ? 'document' : 'photo'
+    // Route by real container: MP4 goes through sendVideo so
+    // Telegram renders it inline with a thumbnail + playback
+    // controls; anything else (webm from older iOS builds) falls
+    // back to sendDocument which at least gets the file uploaded.
+    const mediaTypeLower = (mediaBlob.type || '').toLowerCase()
+    const isMp4Video =
+      mediaTypeLower.startsWith('video/mp4') || /\.(mp4|mov|m4v)$/i.test(mediaName)
+    const isOtherVideo =
+      !isMp4Video &&
+      (mediaTypeLower.startsWith('video/') || /\.(webm)$/i.test(mediaName))
+    const tgMethod = isMp4Video
+      ? 'sendVideo'
+      : isOtherVideo
+        ? 'sendDocument'
+        : 'sendPhoto'
+    const tgFileField = isMp4Video
+      ? 'video'
+      : isOtherVideo
+        ? 'document'
+        : 'photo'
 
     // Show file size + method up front so if the request never
     // gets a response the user (and we) can see what was attempted.
