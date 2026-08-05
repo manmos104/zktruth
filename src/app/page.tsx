@@ -7,6 +7,12 @@ import { ZKTRUTH_CONTRACT_ADDRESS } from '@/lib/contract';
 import { WorldIdVerifyButton } from '@/lib/worldid';
 import { useTelegramBackButton } from './hooks/useTelegramBackButton';
 import { useTonConnectUI, useTonWallet } from '@tonconnect/ui-react';
+import {
+  buildMintTransaction,
+  hashHexToBigInt,
+  messageIdFromPostUrl,
+  timestampToBigInt,
+} from '@/lib/tonMint';
 
 
 const styles = `
@@ -1788,6 +1794,15 @@ export default function Home() {
   // camera side-panel so users can review what actually gets shared
   // (public channel, GPS, wallet, etc.) before they hit SHARE.
   const [privacyOpen, setPrivacyOpen] = useState(false);
+  // Telegram post URL captured after a successful SIGN THIS HASH
+  // channel post — we forward its message_id into the on-chain mint
+  // so the NFT record on TON can be traced back to the exact channel
+  // message that carries the raw media.
+  const [lastTelegramPostUrl, setLastTelegramPostUrl] = useState<string | null>(null);
+  // In-flight indicator for the TON Connect mint round-trip so the
+  // SIGN & MINT button can show a spinner and disable itself while
+  // the wallet is signing.
+  const [minting, setMinting] = useState(false);
   // Blur-brush editor state used inside the replay modal. When
   // blurMode is on, drag gestures on the canvas paint blurred
   // circles over the underlying image (drawn by copying pixels from
@@ -2804,9 +2819,70 @@ export default function Home() {
     setScreen("confirm-tx");
   }, []);
 
-  const handleConfirmTx = useCallback(() => {
-    setScreen("share");
-  }, []);
+  const handleConfirmTx = useCallback(async () => {
+    // Fire the actual on-chain mint. Builds the MintProof payload
+    // from the current capture's metadata, hands it to TON Connect,
+    // and lets the connected wallet (Tonkeeper / Wallet in Telegram
+    // / etc.) surface the sign prompt. When the wallet returns we
+    // advance the flow to the success screen — the actual chain
+    // confirmation is asynchronous but the transaction is already
+    // on the mempool by then.
+    const collectionAddress = process.env.NEXT_PUBLIC_TON_COLLECTION_ADDRESS
+    if (!collectionAddress) {
+      setShareStatus('TON collection address not configured')
+      setTimeout(() => setShareStatus(''), 5000)
+      return
+    }
+    if (!tonWallet) {
+      // Ask the user to connect first — opening the modal is the
+      // same gesture that produces a wallet handle we can send tx
+      // with on the next tap.
+      try { await tonConnectUI.openModal() } catch { /* dismissed */ }
+      return
+    }
+    const gpsHexRaw =
+      gpsEnabled && gpsLocation ? gpsLocation.trim() : ''
+    // GPS hash isn't computed client-side yet; feed 0 unless we're
+    // storing a pre-computed hash string somewhere. Phase 5 can turn
+    // the raw coord pair into a SHA-256 hash before this point.
+    const gpsHash = gpsHexRaw ? hashHexToBigInt(gpsHexRaw) : 0n
+    const tx = buildMintTransaction(collectionAddress, {
+      contentHash: hashHexToBigInt(proofData?.hash),
+      gpsHash,
+      captureTimestamp: timestampToBigInt(proofData?.timestamp),
+      telegramMessageId: messageIdFromPostUrl(lastTelegramPostUrl ?? undefined),
+    })
+    setMinting(true)
+    setShareStatus('SIGN THE MINT IN YOUR WALLET...')
+    try {
+      await tonConnectUI.sendTransaction(tx)
+      setMinting(false)
+      setShareStatus('Mint sent to TON — see it on tonviewer soon')
+      setTimeout(() => setShareStatus(''), 6000)
+      // Navigate to the share screen so the user can jump straight
+      // to cross-posting / cleanup while the tx confirms in the
+      // background (typical TON confirmation ≤ 10 seconds).
+      setScreen('share')
+    } catch (e) {
+      setMinting(false)
+      const msg = (e as Error)?.message ?? String(e)
+      // TON Connect throws "UserRejectedError" / "TON_CONNECT_SDK_ERROR"
+      // when the user cancels — swallow those quietly.
+      if (/cancel|reject|dismiss/i.test(msg)) {
+        setShareStatus('')
+        return
+      }
+      setShareStatus(`Mint failed: ${msg.slice(0, 160)}`)
+      setTimeout(() => setShareStatus(''), 8000)
+    }
+  }, [
+    tonWallet,
+    tonConnectUI,
+    proofData,
+    gpsLocation,
+    gpsEnabled,
+    lastTelegramPostUrl,
+  ]);
 
   const openSnsShare = useCallback((from: string) => {
     setSnsFromScreen(from);
@@ -3016,6 +3092,9 @@ export default function Home() {
       const messageId = data.result.message_id
       const channelPath = CHANNEL_ID.startsWith('@') ? CHANNEL_ID.slice(1) : CHANNEL_ID
       const postUrl = `https://t.me/${channelPath}/${messageId}`
+      // Remember the post URL so a subsequent MINT ON TON call can
+      // stamp its Telegram message id into the on-chain NFT record.
+      setLastTelegramPostUrl(postUrl)
       // Full-screen success burst — swap the "posting..." overlay for
       // a green check that stays for ~1.5s so the outcome reads as a
       // definite "done!" moment.
@@ -3864,7 +3943,14 @@ export default function Home() {
                 </div>
               </div>
               <div className="tx-warning">Gram fees on TON are typically fractions of a cent. Your wallet will display the exact amount before signing.</div>
-              <button className="btn-confirm-tx" onClick={handleConfirmTx}>SIGN &amp; MINT · {TON_GAS_FEE}</button>
+              <button
+                className="btn-confirm-tx"
+                onClick={handleConfirmTx}
+                disabled={minting}
+                style={{ opacity: minting ? 0.6 : 1, cursor: minting ? 'wait' : 'pointer' }}
+              >
+                {minting ? 'AWAITING WALLET...' : `SIGN & MINT · ${TON_GAS_FEE}`}
+              </button>
               <button className="btn-cancel-tx" onClick={() => setScreen("worldid")}>CANCEL</button>
             </div>
           </div>

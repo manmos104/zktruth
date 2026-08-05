@@ -1,0 +1,25 @@
+{
+  "name": "zktruth-ton",
+  "version": "0.1.0",
+  "private": true,
+  "description": "TON (Tact) smart contracts for the zkTruth NFT collection — deployed separately from the Next.js app.",
+  "scripts": {
+    "build": "blueprint build",
+    "test": "blueprint test",
+    "deploy:collection:testnet": "blueprint run deployCollection --testnet",
+    "deploy:collection:mainnet": "blueprint run deployCollection --mainnet",
+    "mint:test:testnet": "blueprint run mintTest --testnet",
+    "read:collection:testnet": "blueprint run readCollection --testnet"
+  },
+  "devDependencies": {
+    "@ton/blueprint": "^0.24.0",
+    "@ton/core": "^0.62.0",
+    "@ton/crypto": "^3.3.0",
+    "@ton/sandbox": "^0.29.0",
+    "@ton/test-utils": "^0.7.0",
+    "@ton/ton": "^15.4.0",
+    "@tact-lang/compiler": "^1.5.4",
+    "@types/node": "^22.10.0",
+    "typescript": "^5.9.0"
+  }
+}
