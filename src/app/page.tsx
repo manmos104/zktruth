@@ -1758,20 +1758,22 @@ function drawCrtOverlay(
   h: number,
   opts: { animateSeed?: number } = {},
 ) {
-  // Partial-coverage broken-signal noise. Instead of blanketing the
-  // whole frame in static (which hides what the user actually
-  // captured), we punch a handful of noisy rectangular patches over
-  // random areas of the image. Effect reads as "the transmission
-  // occasionally glitches" rather than "the TV is broken", so the
-  // subject stays visible while the aesthetic still comes through.
+  // "Bad signal" video-glitch effect. Instead of laying noise on top
+  // (which hides the subject), we *manipulate the already-drawn
+  // frame* — grabbing thin horizontal strips of the underlying image
+  // and re-blitting them at a horizontal offset. Reads as VHS
+  // tracking dropouts / broken transmission where the picture itself
+  // tears and slips, not as a dusty overlay.
   //
-  // Each patch:
-  //   - Is a horizontal band (wider than tall) — mimics tape-tracking
-  //     dropouts and analog signal glitches
-  //   - Gets its own chunky 4×4-pixel noise fill inside a per-patch
-  //     alpha mask so edges fade in/out rather than hard-cutting
-  //   - Position/size re-rolls every animation frame so on video the
-  //     glitches dance around like real intermittent interference
+  // Each glitch strip:
+  //   - Copies a row of pixels from the frame already painted below
+  //   - Pastes it back at the same Y but shifted left/right
+  //   - Occasionally with an RGB-tinted duplicate to sell the "signal
+  //     out of sync" look without paying for a real channel split
+  //
+  // A handful of chunky-noise sparks fires on top of the torn strips
+  // for texture — but only within the strip footprint, so most of
+  // the frame stays perfectly readable.
 
   const seed = opts.animateSeed ?? Math.floor(Date.now() / 33);
   let s = (seed * 1103515245 + 12345) & 0x7fffffff;
@@ -1780,61 +1782,64 @@ function drawCrtOverlay(
     return s / 0x7fffffff;
   };
 
-  // Pixel-scale factor — each "noise cell" is SCALE×SCALE on-screen.
-  const SCALE = 4;
-  const nw = Math.max(1, Math.floor(w / SCALE));
-  const nh = Math.max(1, Math.floor(h / SCALE));
+  // 4–7 glitch strips per frame.
+  const stripCount = 4 + Math.floor(rand() * 4);
+  const source = ctx.canvas;
 
-  // Pre-generate ONE full-frame noise tile at low resolution; we'll
-  // sub-source rectangles out of it for each patch instead of
-  // regenerating noise per patch. Fast + still varied because each
-  // frame produces a fresh tile.
-  const noise = document.createElement('canvas');
-  noise.width = nw;
-  noise.height = nh;
-  const nctx = noise.getContext('2d');
-  if (!nctx) return;
-  const img = nctx.createImageData(nw, nh);
-  const data = img.data;
-  for (let i = 0; i < data.length; i += 4) {
-    const r = rand();
-    let v: number;
-    if (r < 0.45) v = Math.floor(rand() * 40);
-    else if (r < 0.90) v = 215 + Math.floor(rand() * 40);
-    else v = 80 + Math.floor(rand() * 96);
-    data[i] = v;
-    data[i + 1] = v;
-    data[i + 2] = v;
-    data[i + 3] = 255;
-  }
-  nctx.putImageData(img, 0, 0);
+  for (let i = 0; i < stripCount; i++) {
+    const stripH = Math.max(2, Math.floor(h * (0.008 + rand() * 0.05)));
+    const y = Math.floor(rand() * (h - stripH));
+    // Horizontal shift: up to ±12% of frame width, biased away from
+    // zero so a "no-shift" strip doesn't produce a no-op.
+    const shiftMag = 0.02 + rand() * 0.10;
+    const dx = Math.floor((rand() < 0.5 ? -1 : 1) * w * shiftMag);
 
-  ctx.save();
-  ctx.imageSmoothingEnabled = false;
-
-  // 3–5 glitch bands per frame. Small enough to keep the subject
-  // visible; enough to obviously read as intentional distortion.
-  const bandCount = 3 + Math.floor(rand() * 3);
-  for (let i = 0; i < bandCount; i++) {
-    const bandW = w * (0.35 + rand() * 0.55); // 35–90% of frame width
-    const bandH = h * (0.03 + rand() * 0.09); // 3–12% of frame height
-    const bandX = rand() * (w - bandW);
-    const bandY = rand() * (h - bandH);
-    const alpha = 0.75 + rand() * 0.20;        // strong per-patch
-
-    // Clip to the band rectangle, then blit the noise tile at the
-    // per-patch alpha. Hard edges — good enough to read as glitch
-    // bands, no risky compositing modes that could erase the
-    // underlying frame.
     ctx.save();
-    ctx.beginPath();
-    ctx.rect(bandX, bandY, bandW, bandH);
-    ctx.clip();
-    ctx.globalAlpha = alpha;
-    ctx.drawImage(noise, 0, 0, w, h);
+    // Re-blit the strip at the shifted X. We use drawImage(canvas,
+    // canvas) which is well-supported and treats the source as a
+    // snapshot — no read/write conflicts.
+    try {
+      ctx.drawImage(source, 0, y, w, stripH, dx, y, w, stripH);
+    } catch { /* older browsers may refuse self-blit; skip */ }
+
+    // Occasional coloured "ghost" copy for RGB-split flavour. Draws
+    // the same strip shifted the OTHER direction with a red or
+    // cyan tint at partial alpha.
+    if (rand() < 0.5) {
+      ctx.globalAlpha = 0.35;
+      ctx.globalCompositeOperation = 'lighter';
+      // Tint by drawing a coloured rectangle inside a clip mask
+      // shaped like the strip after we blit it.
+      const ghostDx = -dx;
+      try {
+        ctx.drawImage(source, 0, y, w, stripH, ghostDx, y, w, stripH);
+      } catch { /* ignore */ }
+      const tint = rand() < 0.5 ? 'rgba(255,30,60,0.35)' : 'rgba(30,220,255,0.35)';
+      ctx.globalCompositeOperation = 'source-atop';
+      ctx.fillStyle = tint;
+      ctx.fillRect(ghostDx, y, w, stripH);
+    }
+
+    // Fill the exposed gap on the "leaving" side with black so we
+    // don't leave a bare seam where the strip used to be.
+    ctx.globalAlpha = 1;
+    ctx.globalCompositeOperation = 'source-over';
+    ctx.fillStyle = '#000';
+    if (dx > 0) ctx.fillRect(0, y, dx, stripH);
+    else if (dx < 0) ctx.fillRect(w + dx, y, -dx, stripH);
     ctx.restore();
   }
 
+  // A very light dusting of white sparks on the strips helps the
+  // torn edges read as electrical interference. Kept small so it
+  // doesn't drift back into full-frame snow territory.
+  ctx.save();
+  ctx.fillStyle = '#ffffff';
+  ctx.globalAlpha = 0.6;
+  const sparks = Math.floor((w * h) / 4000);
+  for (let i = 0; i < sparks; i++) {
+    ctx.fillRect(rand() * w, rand() * h, 2, 1);
+  }
   ctx.restore();
 }
 
