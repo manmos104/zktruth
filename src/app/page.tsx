@@ -2158,6 +2158,16 @@ export default function Home() {
   const recordedChunksRef = useRef<Blob[]>([]);
   const recCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const recAnimFrameRef = useRef<number | null>(null);
+  // Overlay metadata snapshot taken at record-start. Used both by the
+  // recording drawFrame loop (to paint the badges every tick) and by
+  // recorder.onstop (to lock the SAME values into proofData so the
+  // NFT metadata matches the on-clip watermark exactly).
+  const recOverlayRef = useRef<{
+    timestamp: string;
+    hash: string;
+    gps: string;
+    timeStr: string;
+  } | null>(null);
   // Raw sensor-frame JPEG (data URL) captured at native resolution for
   // NFT upload. Populated on photo capture; cleared on reset. We keep
   // it in a ref rather than state because the mint flow reads it once
@@ -2814,10 +2824,29 @@ export default function Home() {
       const ctx = rc.getContext('2d');
       if (!ctx) return;
 
+      // Freeze the overlay metadata at recording START — we can't
+      // hash video contents in real-time, so we pre-generate the
+      // hash here and stash it so recorder.onstop can lock the same
+      // value into proofData. This keeps the on-clip watermark and
+      // the NFT metadata perfectly in sync.
+      const recStartTsIso = getTimestamp();
+      const recStartTsStr = recStartTsIso.replace('T', ' ').split('.')[0] + ' UTC';
+      const recStartHash = generateHash();
+      const recStartGps = gpsCoords;
+      recOverlayRef.current = {
+        timestamp: recStartTsIso,
+        hash: recStartHash,
+        gps: recStartGps,
+        timeStr: recStartTsStr,
+      };
+
       // Draw loop: video → canvas in cover mode against the PREVIEW
       // aspect. Cover-cropping the source to the same aspect the
       // preview element uses guarantees "what you see is what you
-      // save" — same FOV, same framing.
+      // save" — same FOV, same framing. After the frame is drawn we
+      // paint the proof-of-capture badges on top so the resulting
+      // MP4 (which is also what gets posted to the Telegram channel)
+      // carries the same overlays as photo captures.
       const drawFrame = () => {
         const vw = v.videoWidth || 1080;
         const vh = v.videoHeight || 1920;
@@ -2843,6 +2872,13 @@ export default function Home() {
         }
         ctx.drawImage(v, sx, sy, sw, sh, 0, 0, pw, ph);
         ctx.restore();
+
+        // Bake proof metadata onto every frame.
+        drawZkTruthOverlays(ctx, pw, ph, {
+          timeStr: recStartTsStr,
+          gps: recStartGps,
+          hash: recStartHash,
+        });
 
         recAnimFrameRef.current = requestAnimationFrame(drawFrame);
       };
@@ -2968,7 +3004,20 @@ export default function Home() {
           console.log('[record] blob', { type: blob.type, size: blob.size, chunks: chunks.length });
           setRecordDebug(`Last blob: type=${blob.type} size=${blob.size} chunks=${chunks.length}`);
           setCapturedVideo(blob);
-          const proof = { timestamp: getTimestamp(), hash: generateHash(), gps: gpsCoords, device: "Device", chain: "World Chain", tokenId: Math.floor(Math.random() * 999999) + 1, type: "video" };
+          // Reuse the timestamp / hash / GPS we baked into the video
+          // overlay so the NFT metadata matches the on-screen text
+          // exactly. Fall back to fresh values if the ref somehow
+          // got cleared between record-start and record-stop.
+          const rec = recOverlayRef.current;
+          const proof = {
+            timestamp: rec?.timestamp ?? getTimestamp(),
+            hash: rec?.hash ?? generateHash(),
+            gps: rec?.gps ?? gpsCoords,
+            device: "Device",
+            chain: "World Chain",
+            tokenId: Math.floor(Math.random() * 999999) + 1,
+            type: "video",
+          };
           setCapturedImage(null); setProofData(proof); setMintStep(0); setMintComplete(false);
           setWorldIdVerified(false); setWorldIdVerifying(false); setScreen("worldid");
         };
