@@ -1745,6 +1745,64 @@ function generateTxHash() {
 }
 function getTimestamp() { return new Date().toISOString(); }
 
+// Paint a subtle CRT / broadcast-static texture over the current
+// canvas contents. Deliberately restrained: horizontal scanlines at
+// ~8% opacity, a light random-grain sprinkle, and a soft vignette so
+// the corners fall off like an old tube TV. Called only when the user
+// has explicitly opted in via `crtMode` — the default is a clean
+// evidence-first look. Runs each drawFrame tick for video (so the
+// noise animates), and once at capture time for stills.
+function drawCrtOverlay(
+  ctx: CanvasRenderingContext2D,
+  w: number,
+  h: number,
+  opts: { animateSeed?: number } = {},
+) {
+  ctx.save();
+
+  // Scanlines — 2px band every 4px, at low alpha so text stays legible.
+  ctx.globalAlpha = 0.08;
+  ctx.fillStyle = '#000';
+  const lineStep = 4;
+  for (let y = 0; y < h; y += lineStep) {
+    ctx.fillRect(0, y, w, 2);
+  }
+
+  // Grain — sparse bright pixels. Density kept low (roughly 1 speck
+  // per 200px^2) so it reads as texture rather than damage.
+  ctx.globalAlpha = 0.14;
+  ctx.fillStyle = '#ffffff';
+  const seed = opts.animateSeed ?? Math.floor(Date.now() / 33);
+  // Cheap LCG so the noise pattern is different every frame without
+  // paying for `Math.random()` calls in a tight loop.
+  let s = (seed * 1103515245 + 12345) & 0x7fffffff;
+  const specks = Math.floor((w * h) / 900);
+  for (let i = 0; i < specks; i++) {
+    s = (s * 1103515245 + 12345) & 0x7fffffff;
+    const x = s % w;
+    s = (s * 1103515245 + 12345) & 0x7fffffff;
+    const y = s % h;
+    ctx.fillRect(x, y, 1, 1);
+  }
+
+  // Vignette — radial darkening at the edges. Softer than a hard
+  // border; sits under the text overlays we've already painted so
+  // metadata stays crisp.
+  ctx.globalAlpha = 1.0;
+  const cx = w / 2;
+  const cy = h / 2;
+  const grad = ctx.createRadialGradient(
+    cx, cy, Math.min(w, h) * 0.35,
+    cx, cy, Math.max(w, h) * 0.75,
+  );
+  grad.addColorStop(0, 'rgba(0,0,0,0)');
+  grad.addColorStop(1, 'rgba(0,0,0,0.55)');
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, 0, w, h);
+
+  ctx.restore();
+}
+
 // Paint the zkTruth proof-of-capture overlays (top gradient, chat
 // bubble + wordmark + LIVE pill + WORLD CHAIN pill, and the
 // timestamp/GPS/chain/hash metadata block) onto a canvas that already
@@ -2135,6 +2193,22 @@ export default function Home() {
   // stays cold until the user explicitly taps the GPS button, and
   // that tap is the same gesture that consents to the permission.
   const [gpsEnabled, setGpsEnabled] = useState<boolean>(false);
+  // CRT / broadcast-noise stylisation. Off by default because Proof of
+  // Capture's core promise is legibility — evidence you can't read isn't
+  // evidence. Users who want the aesthetic can flip it on from the side
+  // panel; the choice persists across sessions via localStorage so we
+  // don't nag them about it every time the Mini App reloads.
+  const [crtMode, setCrtMode] = useState<boolean>(false);
+  useEffect(() => {
+    try {
+      const v = localStorage.getItem('zktruth.crtMode');
+      if (v === '1') setCrtMode(true);
+    } catch { /* private mode / disabled storage — stay off */ }
+  }, []);
+  useEffect(() => {
+    try { localStorage.setItem('zktruth.crtMode', crtMode ? '1' : '0'); }
+    catch { /* ignore */ }
+  }, [crtMode]);
 
   // Gas fee shown as Gram (per Durov's Gram wallet rebrand) — the
   // chain itself is still TON L1, but the native currency label
@@ -2593,6 +2667,9 @@ export default function Home() {
             if (vr > cr) { sw = vh * cr; sx = (vw - sw) / 2; }
             else { sh = vw / cr; sy = (vh - sh) / 2; }
             nftCtx.drawImage(v, sx, sy, sw, sh, 0, 0, nw, nh);
+            // Optional CRT / broadcast-noise stylisation — sits under
+            // the proof badges so metadata text stays legible.
+            if (crtMode) drawCrtOverlay(nftCtx, nw, nh);
             // Bake the proof-of-capture badges directly onto the NFT
             // frame so anyone browsing the wallet sees the timestamp,
             // GPS coordinates, chain marker, and hash without having
@@ -2624,6 +2701,7 @@ export default function Home() {
           if (vr > cr) { sw = vh * cr; sx = (vw - sw) / 2; }
           else { sh = vw / cr; sy = (vh - sh) / 2; }
           ctx.drawImage(v, sx, sy, sw, sh, 0, 0, pw, ph);
+          if (crtMode) drawCrtOverlay(ctx, pw, ph);
 
           // Helper: draw rounded rect (Safari-safe, no roundRect)
           function drawPill(c: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, r: number) {
@@ -2757,7 +2835,7 @@ export default function Home() {
       console.error('Capture error:', e);
       setCapturing(false);
     }
-  }, [capturing, cameraReady, gpsCoords]);
+  }, [capturing, cameraReady, gpsCoords, crtMode]);
 
   // Recording hard-stop. 60s × ~775 KB/s (6 Mbps video + 192 kbps
   // audio) ≈ 46 MB — sits under Telegram Bot API's 50 MB upload
@@ -2873,6 +2951,11 @@ export default function Home() {
         }
         ctx.drawImage(v, sx, sy, sw, sh, 0, 0, pw, ph);
         ctx.restore();
+
+        // CRT texture animates every frame (fresh grain each tick) so
+        // the recorded video reads as live static rather than a still
+        // pattern. Only runs when the user has opted in.
+        if (crtMode) drawCrtOverlay(ctx, pw, ph);
 
         // Bake proof metadata onto every frame.
         drawZkTruthOverlays(ctx, pw, ph, {
@@ -3050,7 +3133,7 @@ export default function Home() {
         }
       }, 1000);
     }
-  }, [recording, gpsCoords, zoomLevel, facingMode]);
+  }, [recording, gpsCoords, zoomLevel, facingMode, crtMode]);
 
   const formatTime = (s: number) => `${String(Math.floor(s/60)).padStart(2,'0')}:${String(s%60).padStart(2,'0')}`;
 
@@ -3986,6 +4069,36 @@ export default function Home() {
               <div>
                 <button className="side-btn" onClick={flipCamera}><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{width:22,height:22}}><path d="M1 4v6h6"/><path d="M23 20v-6h-6"/><path d="M20.49 9A9 9 0 0 0 5.64 5.64L1 10m22 4-4.64 4.36A9 9 0 0 1 3.51 15"/></svg></button>
                 <div className="side-btn-label">FLIP</div>
+              </div>
+              {/* CRT / broadcast-noise toggle. Off by default (evidence
+                  first); flipping it on adds scanlines + grain +
+                  vignette to captures for a retro TV aesthetic. Choice
+                  persists across sessions via localStorage. */}
+              <div>
+                <button
+                  className="side-btn"
+                  onClick={() => setCrtMode((v) => !v)}
+                  aria-label={crtMode ? 'Disable CRT effect (proof mode)' : 'Enable CRT effect'}
+                  aria-pressed={crtMode}
+                  style={{
+                    color: crtMode ? '#00ff87' : '#fff',
+                    borderColor: crtMode ? 'rgba(0,255,135,0.6)' : undefined,
+                  }}
+                >
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{width:22,height:22}} strokeLinecap="round" strokeLinejoin="round">
+                    <rect x="2" y="4" width="20" height="14" rx="2" />
+                    <path d="M8 20h8" />
+                    <path d="M12 18v2" />
+                    <path d="M4 8h16" strokeDasharray="2 2" />
+                    <path d="M4 12h16" strokeDasharray="2 2" />
+                  </svg>
+                </button>
+                <div
+                  className="side-btn-label"
+                  style={{ color: crtMode ? '#00ff87' : undefined }}
+                >
+                  {crtMode ? 'CRT ON' : 'CRT'}
+                </div>
               </div>
             </div>
 
