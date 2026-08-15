@@ -2881,11 +2881,18 @@ export default function Home() {
       uploadBlob = new Blob([bytes], { type: mime })
       uploadName = `capture.${mime === 'image/png' ? 'png' : 'jpg'}`
     } else if (capturedVideo) {
-      uploadBlob = capturedVideo
-      const vType = capturedVideo.type || 'video/mp4'
-      const ext = /mp4/i.test(vType)
+      // MediaRecorder returns blobs with codec params baked into the
+      // MIME type (e.g. `video/mp4;codecs=avc1.42000a,mp4a.40.2`).
+      // Vercel Blob's content-type allow list only accepts the bare
+      // form (`video/mp4`), so we strip everything after the semicolon
+      // and re-wrap the underlying bytes with the cleaned MIME. Same
+      // trick we already use for the Telegram sendVideo upload.
+      const rawType = capturedVideo.type || 'video/mp4'
+      const cleanType = rawType.split(';')[0].trim() || 'video/mp4'
+      uploadBlob = new Blob([capturedVideo], { type: cleanType })
+      const ext = /mp4/i.test(cleanType)
         ? 'mp4'
-        : /webm/i.test(vType)
+        : /webm/i.test(cleanType)
           ? 'webm'
           : 'bin'
       uploadName = `capture.${ext}`
