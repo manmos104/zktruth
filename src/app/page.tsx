@@ -1786,29 +1786,24 @@ function drawCrtOverlay(
   if (!snapCtx) return;
   snapCtx.drawImage(ctx.canvas, 0, 0);
 
-  // 2. Punch 3–5 subtle glitch strips (was 6–10 before — user reported
-  //    the earlier tuning was too aggressive and dominated the frame).
-  const stripCount = 3 + Math.floor(rand() * 3);
+  // 2. Punch 1–2 tiny glitch strips per frame. User wants "just a
+  //    hint" — a barely-perceptible slip that only draws the eye if
+  //    you look for it.
+  const stripCount = 1 + Math.floor(rand() * 2);
   for (let i = 0; i < stripCount; i++) {
-    // Thinner strips: 0.8–2.5% of frame height so the tearing reads
-    // as intermittent interference, not a broken picture tube.
-    const stripH = Math.max(3, Math.floor(h * (0.008 + rand() * 0.017)));
+    // Hair-thin strips: 0.3–1% of frame height.
+    const stripH = Math.max(2, Math.floor(h * (0.003 + rand() * 0.007)));
     const y = Math.floor(rand() * (h - stripH));
-    // Smaller shift: 2–8% of frame width.
-    const shift = Math.floor((rand() < 0.5 ? -1 : 1) * w * (0.02 + rand() * 0.06));
+    // Tiny shift: 0.8–3% of frame width.
+    const shift = Math.floor((rand() < 0.5 ? -1 : 1) * w * (0.008 + rand() * 0.022));
 
-    // Blit the snapshot strip at the shifted X. We skip the pre-blit
-    // black fill so the underlying frame still shows through on the
-    // "leaving" side — reads as a soft slip rather than a hard tear.
     ctx.drawImage(snap, 0, y, w, stripH, shift, y, w, stripH);
 
-    // 3. RGB ghost — 40% of strips get a subtle coloured duplicate
-    //    (was 60% + heavier tint). Lighter blending keeps the effect
-    //    on the surface without repainting the image underneath.
-    if (rand() < 0.4) {
-      const ghostShift = -Math.sign(shift || 1) * Math.floor(w * (0.01 + rand() * 0.03));
+    // 3. RGB ghost — 20% chance now, and very faint.
+    if (rand() < 0.2) {
+      const ghostShift = -Math.sign(shift || 1) * Math.floor(w * (0.005 + rand() * 0.015));
       ctx.save();
-      ctx.globalAlpha = 0.28;
+      ctx.globalAlpha = 0.14;
       ctx.globalCompositeOperation = 'lighter';
       ctx.drawImage(snap, 0, y, w, stripH, ghostShift, y, w, stripH);
       ctx.restore();
