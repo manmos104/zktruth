@@ -1758,17 +1758,20 @@ function drawCrtOverlay(
   h: number,
   opts: { animateSeed?: number } = {},
 ) {
-  // Full-coverage analog-TV snow. We paint noise into an offscreen
-  // canvas at a coarser resolution than the target (each "pixel" is
-  // ~4px on the final image) so the specks are chunky enough to
-  // register visually on a phone screen — pixel-perfect 1px noise
-  // washes out to almost nothing on retina displays. Then we
-  // composite the whole noise layer over the captured frame at a
-  // heavy alpha so the effect is unmistakable.
+  // Partial-coverage broken-signal noise. Instead of blanketing the
+  // whole frame in static (which hides what the user actually
+  // captured), we punch a handful of noisy rectangular patches over
+  // random areas of the image. Effect reads as "the transmission
+  // occasionally glitches" rather than "the TV is broken", so the
+  // subject stays visible while the aesthetic still comes through.
   //
-  // Two-tone (bright + dark) noise with a rare mid-grey pass gives
-  // the busy grain a natural CRT snowstorm feel rather than the
-  // shot-noise-only look of a sparse random dot field.
+  // Each patch:
+  //   - Is a horizontal band (wider than tall) — mimics tape-tracking
+  //     dropouts and analog signal glitches
+  //   - Gets its own chunky 4×4-pixel noise fill inside a per-patch
+  //     alpha mask so edges fade in/out rather than hard-cutting
+  //   - Position/size re-rolls every animation frame so on video the
+  //     glitches dance around like real intermittent interference
 
   const seed = opts.animateSeed ?? Math.floor(Date.now() / 33);
   let s = (seed * 1103515245 + 12345) & 0x7fffffff;
@@ -1777,28 +1780,28 @@ function drawCrtOverlay(
     return s / 0x7fffffff;
   };
 
-  // Chunkier noise → each source pixel becomes SCALE×SCALE on target.
+  // Pixel-scale factor — each "noise cell" is SCALE×SCALE on-screen.
   const SCALE = 4;
   const nw = Math.max(1, Math.floor(w / SCALE));
   const nh = Math.max(1, Math.floor(h / SCALE));
 
+  // Pre-generate ONE full-frame noise tile at low resolution; we'll
+  // sub-source rectangles out of it for each patch instead of
+  // regenerating noise per patch. Fast + still varied because each
+  // frame produces a fresh tile.
   const noise = document.createElement('canvas');
   noise.width = nw;
   noise.height = nh;
   const nctx = noise.getContext('2d');
   if (!nctx) return;
-
   const img = nctx.createImageData(nw, nh);
   const data = img.data;
   for (let i = 0; i < data.length; i += 4) {
     const r = rand();
-    // Bias distribution so we get more extreme values (near-black or
-    // near-white) than mids — mirrors how analog TV snow actually
-    // looks. About 45% dark, 45% bright, 10% mid.
     let v: number;
-    if (r < 0.45) v = Math.floor(rand() * 40);            // dark
-    else if (r < 0.90) v = 215 + Math.floor(rand() * 40); // bright
-    else v = 80 + Math.floor(rand() * 96);                // mid
+    if (r < 0.45) v = Math.floor(rand() * 40);
+    else if (r < 0.90) v = 215 + Math.floor(rand() * 40);
+    else v = 80 + Math.floor(rand() * 96);
     data[i] = v;
     data[i + 1] = v;
     data[i + 2] = v;
@@ -1807,11 +1810,31 @@ function drawCrtOverlay(
   nctx.putImageData(img, 0, 0);
 
   ctx.save();
-  // Nearest-neighbour scaling keeps the noise crisp instead of
-  // smoothing it into a grey blur — chunky pixels read as static.
   ctx.imageSmoothingEnabled = false;
-  ctx.globalAlpha = 0.55;
-  ctx.drawImage(noise, 0, 0, w, h);
+
+  // 3–5 glitch bands per frame. Small enough to keep the subject
+  // visible; enough to obviously read as intentional distortion.
+  const bandCount = 3 + Math.floor(rand() * 3);
+  for (let i = 0; i < bandCount; i++) {
+    const bandW = w * (0.35 + rand() * 0.55); // 35–90% of frame width
+    const bandH = h * (0.03 + rand() * 0.09); // 3–12% of frame height
+    const bandX = rand() * (w - bandW);
+    const bandY = rand() * (h - bandH);
+    const alpha = 0.75 + rand() * 0.20;        // strong per-patch
+
+    // Clip to the band rectangle, then blit the noise tile at the
+    // per-patch alpha. Hard edges — good enough to read as glitch
+    // bands, no risky compositing modes that could erase the
+    // underlying frame.
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(bandX, bandY, bandW, bandH);
+    ctx.clip();
+    ctx.globalAlpha = alpha;
+    ctx.drawImage(noise, 0, 0, w, h);
+    ctx.restore();
+  }
+
   ctx.restore();
 }
 
