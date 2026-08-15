@@ -11,6 +11,7 @@ import {
   buildMintTransaction,
   hashHexToBigInt,
   messageIdFromPostUrl,
+  normaliseHashHex,
   timestampToBigInt,
 } from '@/lib/tonMint';
 
@@ -2840,6 +2841,56 @@ export default function Home() {
       try { await tonConnectUI.openModal() } catch { /* dismissed */ }
       return
     }
+
+    // Validate the content hash BEFORE we ask the wallet to sign — a
+    // malformed hash means the NFT metadata endpoint won't be able to
+    // find the uploaded image later, and re-minting is expensive.
+    const contentHashHex = normaliseHashHex(proofData?.hash)
+    if (!contentHashHex) {
+      setShareStatus('Missing capture hash — retake the photo and try again')
+      setTimeout(() => setShareStatus(''), 5000)
+      return
+    }
+
+    setMinting(true)
+
+    // 1) Upload the captured photo to Vercel Blob under the
+    //    deterministic key `captures/<hash>.jpg` so the NFT metadata
+    //    endpoint can construct the image URL from the same hash.
+    //    We deliberately BLOCK the mint on this — a Proof NFT with no
+    //    image is worse than no NFT at all, and the fee is non-refundable.
+    if (capturedImage && capturedImage.startsWith('data:')) {
+      setShareStatus('UPLOADING CAPTURE TO STORAGE...')
+      try {
+        const dataUrl = capturedImage
+        const commaIdx = dataUrl.indexOf(',')
+        const meta = dataUrl.slice(0, commaIdx)
+        const b64 = dataUrl.slice(commaIdx + 1)
+        const mime = /data:([^;]+)/.exec(meta)?.[1] || 'image/jpeg'
+        const bin = atob(b64)
+        const bytes = new Uint8Array(bin.length)
+        for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i)
+        const blob = new Blob([bytes], { type: mime })
+        const form = new FormData()
+        form.append('file', blob, `capture.${mime === 'image/png' ? 'png' : 'jpg'}`)
+        form.append('hash', contentHashHex)
+        const res = await fetch('/api/upload/capture', {
+          method: 'POST',
+          body: form,
+        })
+        if (!res.ok) {
+          const err = await res.text().catch(() => '')
+          throw new Error(`Upload failed (${res.status}): ${err.slice(0, 120)}`)
+        }
+      } catch (e) {
+        setMinting(false)
+        const msg = (e as Error)?.message ?? String(e)
+        setShareStatus(`Image upload failed: ${msg.slice(0, 160)}`)
+        setTimeout(() => setShareStatus(''), 8000)
+        return
+      }
+    }
+
     const gpsHexRaw =
       gpsEnabled && gpsLocation ? gpsLocation.trim() : ''
     // GPS hash isn't computed client-side yet; feed 0 unless we're
@@ -2847,12 +2898,11 @@ export default function Home() {
     // the raw coord pair into a SHA-256 hash before this point.
     const gpsHash = gpsHexRaw ? hashHexToBigInt(gpsHexRaw) : 0n
     const tx = buildMintTransaction(collectionAddress, {
-      contentHash: hashHexToBigInt(proofData?.hash),
+      contentHashHex,
       gpsHash,
       captureTimestamp: timestampToBigInt(proofData?.timestamp),
       telegramMessageId: messageIdFromPostUrl(lastTelegramPostUrl ?? undefined),
     })
-    setMinting(true)
     setShareStatus('SIGN THE MINT IN YOUR WALLET...')
     try {
       await tonConnectUI.sendTransaction(tx)
@@ -2882,6 +2932,7 @@ export default function Home() {
     gpsLocation,
     gpsEnabled,
     lastTelegramPostUrl,
+    capturedImage,
   ]);
 
   const openSnsShare = useCallback((from: string) => {

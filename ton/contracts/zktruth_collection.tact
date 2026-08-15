@@ -36,6 +36,10 @@ message MintProof {
     gpsHash: Int;             // 256-bit hash of GPS coords (0 if opted out)
     captureTimestamp: Int as uint64;
     telegramMessageId: Int as uint64;  // channel message id for the post
+    // TEP-64 offchain content cell built by the frontend. Encodes the
+    // per-item metadata URL (e.g. https://zktruth.vercel.app/api/nft/item/<hex-hash>).
+    // Building it client-side sidesteps Tact's lack of Int→hex conversion.
+    individualContent: Cell;
 }
 
 // Standard TEP-62 collection data getter response.
@@ -102,7 +106,7 @@ contract ZkTruthCollection with Deployable, Ownable {
             body: InitProof{
                 queryId: 0,
                 ownerAddress: ctx.sender,
-                content: self.itemContentPrefix,
+                content: msg.individualContent,
                 contentHash: msg.contentHash,
                 gpsHash: msg.gpsHash,
                 captureTimestamp: msg.captureTimestamp,
