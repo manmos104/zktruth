@@ -59,9 +59,20 @@ export async function POST(request: Request) {
   }
   const hash = hashRaw.toLowerCase()
 
-  // Guess a reasonable extension so wallets that sniff by suffix are
-  // happy. Default to jpg since our capture pipeline encodes JPEG.
-  const ext = file.type === 'image/png' ? 'png' : 'jpg'
+  // Pick an extension the wallets / marketplaces will sniff correctly.
+  // Order matters: check the most-specific mime types first (video vs
+  // image), then fall back to jpg for the common photo path.
+  const mime = (file.type || '').toLowerCase()
+  const ext =
+    mime === 'image/png'
+      ? 'png'
+      : mime.startsWith('video/mp4') || mime === 'video/quicktime'
+        ? 'mp4'
+        : mime.startsWith('video/webm')
+          ? 'webm'
+          : mime.startsWith('video/')
+            ? 'mp4'
+            : 'jpg'
   const key = `captures/${hash}.${ext}`
 
   // Content-addressed storage: the same hash always maps to the same

@@ -9,38 +9,60 @@ import { head } from '@vercel/blob'
  * inside `individualContent`. Wallets fetch that URL and expect JSON
  * describing the specific capture — which is what we assemble here.
  *
- * The image URL is resolved by asking Vercel Blob for the metadata of
- * the deterministic key `captures/<sha256-hex>.jpg` (also `.png`).
- * The frontend uploads to that exact key right before it fires the
- * mint tx, so by the time a wallet requests this JSON, the Blob is
- * already published and `head()` returns the public https URL — no
- * env var wrangling required.
+ * The media URL is resolved by asking Vercel Blob for the metadata of
+ * a deterministic key. The frontend uploads captured media to
+ *   captures/<sha256-hex>.<ext>
+ * right before firing the mint tx, so by the time a wallet fetches
+ * this JSON, the blob is already published and `head()` returns the
+ * public https URL — no BLOB_BASE_URL env wrangling required.
  *
- * If Blob returns 404 (upload didn't happen for some reason) we fall
- * back to the generic wordmark so the wallet still renders something
- * instead of a broken tile.
+ * Media types handled:
+ *   .jpg / .png  → sets `image` to the blob URL
+ *   .mp4 / .webm → sets `animation_url` to the blob URL, keeps `image`
+ *                  as the fallback logo so wallets that only render
+ *                  `image` still have something to show
+ *
+ * If nothing exists under any extension we fall back to the generic
+ * wordmark so the wallet still renders a tile instead of a broken
+ * icon.
  */
 
 const FALLBACK_IMAGE = 'https://zktruth.vercel.app/zktruth-logo-green.png'
+
+interface ResolvedMedia {
+  image: string
+  animation_url?: string
+}
 
 function shortHash(hash: string): string {
   return hash.length > 10 ? `${hash.slice(0, 6)}…${hash.slice(-4)}` : hash
 }
 
-async function resolveImageUrl(hash: string): Promise<string> {
-  const token = process.env.BLOB_READ_WRITE_TOKEN
-  if (!token) return FALLBACK_IMAGE
-  // Try jpg first (our default capture format), then png. head() throws
-  // on 404, so we swallow and fall through.
-  for (const ext of ['jpg', 'png']) {
-    try {
-      const meta = await head(`captures/${hash}.${ext}`, { token })
-      if (meta?.url) return meta.url
-    } catch {
-      // not found under this extension — try the next one
-    }
+async function tryHead(pathname: string, token: string): Promise<string | null> {
+  try {
+    const meta = await head(pathname, { token })
+    return meta?.url ?? null
+  } catch {
+    return null
   }
-  return FALLBACK_IMAGE
+}
+
+async function resolveMedia(hash: string): Promise<ResolvedMedia> {
+  const token = process.env.BLOB_READ_WRITE_TOKEN
+  if (!token) return { image: FALLBACK_IMAGE }
+
+  // Try image formats first — most captures are photos.
+  for (const ext of ['jpg', 'png']) {
+    const url = await tryHead(`captures/${hash}.${ext}`, token)
+    if (url) return { image: url }
+  }
+  // Then try video formats — set animation_url and keep image as
+  // fallback so wallets without video support still render.
+  for (const ext of ['mp4', 'webm']) {
+    const url = await tryHead(`captures/${hash}.${ext}`, token)
+    if (url) return { image: FALLBACK_IMAGE, animation_url: url }
+  }
+  return { image: FALLBACK_IMAGE }
 }
 
 export async function GET(
@@ -53,15 +75,17 @@ export async function GET(
   const isValidHash = /^[0-9a-f]{64}$/.test(rawHash)
   const hash = isValidHash ? rawHash : ''
 
-  const image = hash ? await resolveImageUrl(hash) : FALLBACK_IMAGE
+  const media: ResolvedMedia = hash
+    ? await resolveMedia(hash)
+    : { image: FALLBACK_IMAGE }
 
-  const body = {
+  const body: Record<string, unknown> = {
     name: hash
       ? `zkTruth Proof #${shortHash(hash)}`
       : 'zkTruth Proof of Capture',
     description:
       'On-chain, tamper-evident proof of a real-world capture. The SHA-256 hash of the captured media is anchored on TON and linked to the original Telegram channel post.',
-    image,
+    image: media.image,
     external_url: hash
       ? `https://zktruth.vercel.app/proof/${hash}`
       : 'https://zktruth.vercel.app',
@@ -72,6 +96,8 @@ export async function GET(
       ...(hash ? [{ trait_type: 'Content Hash', value: hash }] : []),
     ],
   }
+  if (media.animation_url) body.animation_url = media.animation_url
+
   return NextResponse.json(body, {
     headers: {
       // Wallets cache metadata aggressively. Keep it warm for CDN but

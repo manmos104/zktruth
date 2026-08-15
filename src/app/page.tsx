@@ -2854,41 +2854,78 @@ export default function Home() {
 
     setMinting(true)
 
-    // 1) Upload the captured photo to Vercel Blob under the
-    //    deterministic key `captures/<hash>.jpg` so the NFT metadata
-    //    endpoint can construct the image URL from the same hash.
-    //    We deliberately BLOCK the mint on this — a Proof NFT with no
-    //    image is worse than no NFT at all, and the fee is non-refundable.
+    // 1) Upload the captured media to Vercel Blob under the
+    //    deterministic key `captures/<hash>.<ext>` so the NFT metadata
+    //    endpoint can construct the image / animation URL from the
+    //    same hash. We deliberately BLOCK the mint on this — a Proof
+    //    NFT with no media is worse than no NFT at all, and the mint
+    //    fee is non-refundable.
+    //
+    // Two capture paths converge here:
+    //   - PHOTO   : `capturedImage` is a `data:` URL (base64)
+    //   - VIDEO   : `capturedVideo` is a raw `Blob` produced by
+    //               MediaRecorder (webm or mp4)
+    // Both are POSTed to the same endpoint as multipart/form-data.
+    let uploadBlob: Blob | null = null
+    let uploadName = 'capture.jpg'
     if (capturedImage && capturedImage.startsWith('data:')) {
+      const dataUrl = capturedImage
+      const commaIdx = dataUrl.indexOf(',')
+      const meta = dataUrl.slice(0, commaIdx)
+      const b64 = dataUrl.slice(commaIdx + 1)
+      const mime = /data:([^;]+)/.exec(meta)?.[1] || 'image/jpeg'
+      const bin = atob(b64)
+      const bytes = new Uint8Array(bin.length)
+      for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i)
+      uploadBlob = new Blob([bytes], { type: mime })
+      uploadName = `capture.${mime === 'image/png' ? 'png' : 'jpg'}`
+    } else if (capturedVideo) {
+      uploadBlob = capturedVideo
+      const vType = capturedVideo.type || 'video/mp4'
+      const ext = /mp4/i.test(vType)
+        ? 'mp4'
+        : /webm/i.test(vType)
+          ? 'webm'
+          : 'bin'
+      uploadName = `capture.${ext}`
+    }
+
+    if (uploadBlob) {
       setShareStatus('UPLOADING CAPTURE TO STORAGE...')
       try {
-        const dataUrl = capturedImage
-        const commaIdx = dataUrl.indexOf(',')
-        const meta = dataUrl.slice(0, commaIdx)
-        const b64 = dataUrl.slice(commaIdx + 1)
-        const mime = /data:([^;]+)/.exec(meta)?.[1] || 'image/jpeg'
-        const bin = atob(b64)
-        const bytes = new Uint8Array(bin.length)
-        for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i)
-        const blob = new Blob([bytes], { type: mime })
         const form = new FormData()
-        form.append('file', blob, `capture.${mime === 'image/png' ? 'png' : 'jpg'}`)
+        form.append('file', uploadBlob, uploadName)
         form.append('hash', contentHashHex)
         const res = await fetch('/api/upload/capture', {
           method: 'POST',
           body: form,
         })
+        const bodyText = await res.text().catch(() => '')
         if (!res.ok) {
-          const err = await res.text().catch(() => '')
-          throw new Error(`Upload failed (${res.status}): ${err.slice(0, 120)}`)
+          throw new Error(`Upload ${res.status}: ${bodyText.slice(0, 140)}`)
         }
+        // Surface the resolved public URL in the status bar so we can
+        // eyeball it before committing to the mint. Wallets fetch this
+        // exact URL later; if it's wrong now, the NFT will render blank.
+        try {
+          const parsed = JSON.parse(bodyText) as { url?: string }
+          if (parsed?.url) {
+            setShareStatus(`UPLOADED: ${parsed.url.slice(-60)}`)
+          }
+        } catch { /* non-JSON body — ignore */ }
       } catch (e) {
         setMinting(false)
         const msg = (e as Error)?.message ?? String(e)
-        setShareStatus(`Image upload failed: ${msg.slice(0, 160)}`)
-        setTimeout(() => setShareStatus(''), 8000)
+        setShareStatus(`Upload failed: ${msg.slice(0, 200)}`)
+        setTimeout(() => setShareStatus(''), 10000)
         return
       }
+    } else {
+      // No media at all — bail rather than mint a blank NFT.
+      setMinting(false)
+      setShareStatus('No capture to mint — retake the photo/video first')
+      setTimeout(() => setShareStatus(''), 5000)
+      return
     }
 
     const gpsHexRaw =
@@ -2933,6 +2970,7 @@ export default function Home() {
     gpsEnabled,
     lastTelegramPostUrl,
     capturedImage,
+    capturedVideo,
   ]);
 
   const openSnsShare = useCallback((from: string) => {
