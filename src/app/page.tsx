@@ -1744,6 +1744,78 @@ function generateTxHash() {
 }
 function getTimestamp() { return new Date().toISOString(); }
 
+// Grab the first drawable frame of a video Blob and encode it as a
+// JPEG. Used to synthesise a static poster for video NFTs so wallets
+// that only render `image` (not `animation_url`) still show the
+// actual capture instead of the fallback logo. Returns null when the
+// browser can't decode the video (e.g. codec unsupported).
+async function extractFirstFrameJpeg(video: Blob): Promise<Blob | null> {
+  const url = URL.createObjectURL(video)
+  try {
+    return await new Promise<Blob | null>((resolve) => {
+      const el = document.createElement('video')
+      el.muted = true
+      el.playsInline = true
+      el.crossOrigin = 'anonymous'
+      el.preload = 'auto'
+      el.src = url
+
+      let settled = false
+      const done = (b: Blob | null) => {
+        if (settled) return
+        settled = true
+        resolve(b)
+      }
+
+      // Bail out after 8s so a stuck decode doesn't wedge the mint UI.
+      const timeout = setTimeout(() => done(null), 8000)
+
+      const paintFrame = () => {
+        try {
+          const w = el.videoWidth
+          const h = el.videoHeight
+          if (!w || !h) return done(null)
+          const canvas = document.createElement('canvas')
+          canvas.width = w
+          canvas.height = h
+          const ctx = canvas.getContext('2d')
+          if (!ctx) return done(null)
+          ctx.drawImage(el, 0, 0, w, h)
+          canvas.toBlob(
+            (b) => {
+              clearTimeout(timeout)
+              done(b)
+            },
+            'image/jpeg',
+            0.85,
+          )
+        } catch {
+          clearTimeout(timeout)
+          done(null)
+        }
+      }
+
+      el.addEventListener('error', () => {
+        clearTimeout(timeout)
+        done(null)
+      })
+      // `seeked` fires after we jump into the first real frame — many
+      // codecs deliver a black/garbage frame at t=0, so nudging a tick
+      // forward gives a cleaner poster.
+      el.addEventListener('seeked', paintFrame, { once: true })
+      el.addEventListener('loadeddata', () => {
+        try {
+          el.currentTime = Math.min(0.1, (el.duration || 1) * 0.1)
+        } catch {
+          paintFrame()
+        }
+      }, { once: true })
+    })
+  } finally {
+    URL.revokeObjectURL(url)
+  }
+}
+
 const MINT_STEPS = [
   { label: "Verifying SHA-256 hash…", progress: 20 },
   { label: "Building metadata…", progress: 45 },
@@ -2917,6 +2989,34 @@ export default function Home() {
           contentType: uploadBlob.type || undefined,
         })
         setShareStatus(`UPLOADED: ${blob.url.slice(-60)}`)
+
+        // For videos, ALSO upload a first-frame JPEG poster under the
+        // same hash. Wallets like Tonkeeper only render `image`, not
+        // `animation_url`, so without a static poster the NFT tile
+        // falls back to the generic zkTruth logo. The metadata endpoint
+        // probes jpg first, then mp4/webm — so a matching .jpg makes
+        // `image` resolve to the real thumbnail while `animation_url`
+        // still points at the full video.
+        if (/^video\//i.test(uploadBlob.type)) {
+          try {
+            setShareStatus('EXTRACTING VIDEO THUMBNAIL...')
+            const posterBlob = await extractFirstFrameJpeg(uploadBlob)
+            if (posterBlob) {
+              const posterPath = `captures/${contentHashHex}.jpg`
+              await upload(posterPath, posterBlob, {
+                access: 'public',
+                handleUploadUrl: '/api/upload/token',
+                contentType: 'image/jpeg',
+              })
+              setShareStatus('POSTER UPLOADED')
+            }
+          } catch (posterErr) {
+            // Poster is best-effort; a missing thumbnail just means the
+            // NFT falls back to the logo tile. Log but keep going —
+            // we don't want to block the mint on a thumbnail failure.
+            console.warn('poster extraction failed', posterErr)
+          }
+        }
       } catch (e) {
         setMinting(false)
         const msg = (e as Error)?.message ?? String(e)
