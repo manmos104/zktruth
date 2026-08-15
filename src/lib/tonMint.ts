@@ -12,10 +12,12 @@ import type { SendTransactionRequest } from '@tonconnect/ui-react'
  * instead of every NFT pointing at the same generic collection prefix.
  * Building the URL client-side avoids Tact's lack of Int→hex support.
  *
- * The 32-bit opcode is crc32 of the message name "MintProof". The value
- * is unchanged from v1 (opcode is derived from the name, not the field
- * layout), but the payload BODY layout is different — v1 wallets/clients
- * cannot talk to a v2 collection and vice versa.
+ * The 32-bit opcode is Tact's auto-generated message id for MintProof.
+ * Tact 1.6+ derives this id from the STRUCT SHAPE (field names + types),
+ * NOT just the message name — so adding `individualContent: Cell` in v2
+ * changed the id vs v1. Always lift the value from the freshly compiled
+ * wrapper at ton/build/ZkTruthCollection/tact_ZkTruthCollection.ts
+ * (look for `b_0.storeUint(<value>, 32)` inside `storeMintProof`).
  *
  * Field layout of MintProof v2:
  *   contentHash        Int as int257
@@ -25,7 +27,7 @@ import type { SendTransactionRequest } from '@tonconnect/ui-react'
  *   individualContent  Cell (TEP-64 offchain content, ref)
  */
 
-const OP_MINT_PROOF = 3892411072
+const OP_MINT_PROOF = 3564644727
 
 // Metadata endpoint that will serve the per-hash JSON. The `.hex` suffix
 // is the SHA-256 of the capture (no 0x prefix, lowercase). Kept as a
