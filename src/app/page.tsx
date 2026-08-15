@@ -1758,53 +1758,60 @@ function drawCrtOverlay(
   h: number,
   opts: { animateSeed?: number } = {},
 ) {
-  ctx.save();
+  // Full-coverage analog-TV snow. We paint noise into an offscreen
+  // canvas at a coarser resolution than the target (each "pixel" is
+  // ~4px on the final image) so the specks are chunky enough to
+  // register visually on a phone screen — pixel-perfect 1px noise
+  // washes out to almost nothing on retina displays. Then we
+  // composite the whole noise layer over the captured frame at a
+  // heavy alpha so the effect is unmistakable.
+  //
+  // Two-tone (bright + dark) noise with a rare mid-grey pass gives
+  // the busy grain a natural CRT snowstorm feel rather than the
+  // shot-noise-only look of a sparse random dot field.
 
   const seed = opts.animateSeed ?? Math.floor(Date.now() / 33);
-  // Cheap deterministic LCG — different seed per frame keeps the
-  // noise animating without paying for Math.random() in a tight loop.
   let s = (seed * 1103515245 + 12345) & 0x7fffffff;
   const rand = () => {
     s = (s * 1103515245 + 12345) & 0x7fffffff;
     return s / 0x7fffffff;
   };
 
-  // Focus is 砂煙 / TV static — no scanlines, no rolling bands, no
-  // colour tint. Just LOTS of noise, hitting both bright and dark
-  // registers so it reads as busy analogue snow rather than a light
-  // sprinkle. Two passes per polarity (1px specks + occasional 2px
-  // clumps) give the texture depth without turning into obvious dots.
+  // Chunkier noise → each source pixel becomes SCALE×SCALE on target.
+  const SCALE = 4;
+  const nw = Math.max(1, Math.floor(w / SCALE));
+  const nh = Math.max(1, Math.floor(h / SCALE));
 
-  // Bright specks (dense pass)
+  const noise = document.createElement('canvas');
+  noise.width = nw;
+  noise.height = nh;
+  const nctx = noise.getContext('2d');
+  if (!nctx) return;
+
+  const img = nctx.createImageData(nw, nh);
+  const data = img.data;
+  for (let i = 0; i < data.length; i += 4) {
+    const r = rand();
+    // Bias distribution so we get more extreme values (near-black or
+    // near-white) than mids — mirrors how analog TV snow actually
+    // looks. About 45% dark, 45% bright, 10% mid.
+    let v: number;
+    if (r < 0.45) v = Math.floor(rand() * 40);            // dark
+    else if (r < 0.90) v = 215 + Math.floor(rand() * 40); // bright
+    else v = 80 + Math.floor(rand() * 96);                // mid
+    data[i] = v;
+    data[i + 1] = v;
+    data[i + 2] = v;
+    data[i + 3] = 255;
+  }
+  nctx.putImageData(img, 0, 0);
+
+  ctx.save();
+  // Nearest-neighbour scaling keeps the noise crisp instead of
+  // smoothing it into a grey blur — chunky pixels read as static.
+  ctx.imageSmoothingEnabled = false;
   ctx.globalAlpha = 0.55;
-  ctx.fillStyle = '#ffffff';
-  const brightSpecks = Math.floor((w * h) / 90);
-  for (let i = 0; i < brightSpecks; i++) {
-    ctx.fillRect(rand() * w, rand() * h, 1, 1);
-  }
-
-  // Bright clumps (fewer, 2px)
-  ctx.globalAlpha = 0.45;
-  const brightClumps = Math.floor((w * h) / 900);
-  for (let i = 0; i < brightClumps; i++) {
-    ctx.fillRect(rand() * w, rand() * h, 2, 2);
-  }
-
-  // Dark specks (dense pass)
-  ctx.globalAlpha = 0.50;
-  ctx.fillStyle = '#000000';
-  const darkSpecks = Math.floor((w * h) / 120);
-  for (let i = 0; i < darkSpecks; i++) {
-    ctx.fillRect(rand() * w, rand() * h, 1, 1);
-  }
-
-  // Dark clumps (fewer, 2px)
-  ctx.globalAlpha = 0.40;
-  const darkClumps = Math.floor((w * h) / 1200);
-  for (let i = 0; i < darkClumps; i++) {
-    ctx.fillRect(rand() * w, rand() * h, 2, 2);
-  }
-
+  ctx.drawImage(noise, 0, 0, w, h);
   ctx.restore();
 }
 
