@@ -7,6 +7,7 @@ import { ZKTRUTH_CONTRACT_ADDRESS } from '@/lib/contract';
 import { WorldIdVerifyButton } from '@/lib/worldid';
 import { useTelegramBackButton } from './hooks/useTelegramBackButton';
 import { useTonConnectUI, useTonWallet } from '@tonconnect/ui-react';
+import { upload } from '@vercel/blob/client';
 import {
   buildMintTransaction,
   hashHexToBigInt,
@@ -2893,26 +2894,22 @@ export default function Home() {
     if (uploadBlob) {
       setShareStatus('UPLOADING CAPTURE TO STORAGE...')
       try {
-        const form = new FormData()
-        form.append('file', uploadBlob, uploadName)
-        form.append('hash', contentHashHex)
-        const res = await fetch('/api/upload/capture', {
-          method: 'POST',
-          body: form,
+        // Derive the extension from the filename we picked above so
+        // the Blob key matches what the metadata endpoint's head()
+        // probes for.
+        const extMatch = /\.([a-z0-9]+)$/i.exec(uploadName)
+        const ext = (extMatch?.[1] ?? 'jpg').toLowerCase()
+        const pathname = `captures/${contentHashHex}.${ext}`
+        // Client-side upload bypasses the Vercel Function 4.5 MB body
+        // cap — the browser PUTs straight to Blob storage using a
+        // token that /api/upload/token signs for this exact pathname.
+        // This is what makes 50 MB video mints work.
+        const blob = await upload(pathname, uploadBlob, {
+          access: 'public',
+          handleUploadUrl: '/api/upload/token',
+          contentType: uploadBlob.type || undefined,
         })
-        const bodyText = await res.text().catch(() => '')
-        if (!res.ok) {
-          throw new Error(`Upload ${res.status}: ${bodyText.slice(0, 140)}`)
-        }
-        // Surface the resolved public URL in the status bar so we can
-        // eyeball it before committing to the mint. Wallets fetch this
-        // exact URL later; if it's wrong now, the NFT will render blank.
-        try {
-          const parsed = JSON.parse(bodyText) as { url?: string }
-          if (parsed?.url) {
-            setShareStatus(`UPLOADED: ${parsed.url.slice(-60)}`)
-          }
-        } catch { /* non-JSON body — ignore */ }
+        setShareStatus(`UPLOADED: ${blob.url.slice(-60)}`)
       } catch (e) {
         setMinting(false)
         const msg = (e as Error)?.message ?? String(e)
