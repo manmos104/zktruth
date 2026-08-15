@@ -8,6 +8,7 @@ import { WorldIdVerifyButton } from '@/lib/worldid';
 import { useTelegramBackButton } from './hooks/useTelegramBackButton';
 import { useTonConnectUI, useTonWallet } from '@tonconnect/ui-react';
 import { upload } from '@vercel/blob/client';
+import { Address } from '@ton/core';
 import {
   buildMintTransaction,
   hashHexToBigInt,
@@ -3482,7 +3483,22 @@ export default function Home() {
       captionLines.push(`<b>Location</b> · ${gpsForCaption}`)
     }
     if (tonWallet?.account.address) {
-      captionLines.push(`<b>Wallet</b> · <code>${shortHash(tonWallet.account.address)}</code>`)
+      // TON Connect hands us the "raw" address form (0:<hex-hash>) — the
+      // one Tonkeeper actually displays is the user-friendly base64
+      // encoding (UQ… non-bounceable). Convert here so the caption
+      // matches what the user sees in their wallet, otherwise short-
+      // hashing the raw form produces "0:8e4a…dbfe" and the user can't
+      // reconcile it with their own address.
+      const rawAddr = tonWallet.account.address
+      let friendlyAddr = rawAddr
+      try {
+        friendlyAddr = Address.parse(rawAddr).toString({
+          urlSafe: true,
+          bounceable: false,
+          testOnly: false,
+        })
+      } catch { /* fall back to raw if parsing fails */ }
+      captionLines.push(`<b>Wallet</b> · <code>${shortHash(friendlyAddr)}</code>`)
     }
     const trimmedComment = captureComment?.trim()
     if (trimmedComment) {
