@@ -4359,13 +4359,36 @@ export default function Home() {
                     boxShadow: '0 4px 18px rgba(0,152,234,0.32)',
                     opacity: sharing ? 0.6 : 1,
                     cursor: sharing ? 'wait' : 'pointer',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    gap: 2,
+                    lineHeight: 1.2,
+                    padding: '12px 16px',
                   }}
                 >
-                  {sharing
-                    ? 'POSTING...'
-                    : shortTonAddr
-                      ? `SIGN AS :: ${shortTonAddr}`
-                      : 'SIGN THIS HASH'}
+                  {sharing ? (
+                    <span style={{ fontWeight: 700 }}>POSTING...</span>
+                  ) : (
+                    <>
+                      <span style={{ fontWeight: 700, fontSize: 15, letterSpacing: 0.5 }}>
+                        📢 POST HASH TO CHANNEL · FREE
+                      </span>
+                      <span
+                        style={{
+                          fontSize: 10,
+                          opacity: 0.85,
+                          fontWeight: 500,
+                          letterSpacing: 0.3,
+                        }}
+                      >
+                        {shortTonAddr
+                          ? `no gas · signed as ${shortTonAddr}`
+                          : 'no gas · no wallet needed'}
+                      </span>
+                    </>
+                  )}
                 </button>
 
                 {/* Placeholder mint button — routes into the existing
