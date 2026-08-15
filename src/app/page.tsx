@@ -1762,88 +1762,48 @@ function drawCrtOverlay(
 
   const seed = opts.animateSeed ?? Math.floor(Date.now() / 33);
   // Cheap deterministic LCG — different seed per frame keeps the
-  // noise animating without the cost of Math.random() in a tight loop.
+  // noise animating without paying for Math.random() in a tight loop.
   let s = (seed * 1103515245 + 12345) & 0x7fffffff;
   const rand = () => {
     s = (s * 1103515245 + 12345) & 0x7fffffff;
     return s / 0x7fffffff;
   };
 
-  // --- 1. Scanlines. Alternating dark/light rows for a proper CRT
-  //     comb pattern. Dark stripes at 30% opacity make the effect
-  //     unmistakable while still keeping the underlying image visible.
-  const lineStep = 4;
-  ctx.globalAlpha = 0.30;
-  ctx.fillStyle = '#000';
-  for (let y = 0; y < h; y += lineStep) {
-    ctx.fillRect(0, y, w, 2);
-  }
-  // Faint bright rows in between — sells the "phosphor" glow.
-  ctx.globalAlpha = 0.08;
-  ctx.fillStyle = '#ffffff';
-  for (let y = 2; y < h; y += lineStep) {
-    ctx.fillRect(0, y, w, 1);
-  }
+  // Focus is 砂煙 / TV static — no scanlines, no rolling bands, no
+  // colour tint. Just LOTS of noise, hitting both bright and dark
+  // registers so it reads as busy analogue snow rather than a light
+  // sprinkle. Two passes per polarity (1px specks + occasional 2px
+  // clumps) give the texture depth without turning into obvious dots.
 
-  // --- 2. Static grain. Density bumped ~3× and split into bright +
-  //     dark specks so the noise reads as busy TV static rather than
-  //     a sparse dust texture.
-  ctx.globalAlpha = 0.35;
-  const brightSpecks = Math.floor((w * h) / 260);
+  // Bright specks (dense pass)
+  ctx.globalAlpha = 0.55;
   ctx.fillStyle = '#ffffff';
+  const brightSpecks = Math.floor((w * h) / 90);
   for (let i = 0; i < brightSpecks; i++) {
     ctx.fillRect(rand() * w, rand() * h, 1, 1);
   }
-  ctx.globalAlpha = 0.28;
-  const darkSpecks = Math.floor((w * h) / 320);
+
+  // Bright clumps (fewer, 2px)
+  ctx.globalAlpha = 0.45;
+  const brightClumps = Math.floor((w * h) / 900);
+  for (let i = 0; i < brightClumps; i++) {
+    ctx.fillRect(rand() * w, rand() * h, 2, 2);
+  }
+
+  // Dark specks (dense pass)
+  ctx.globalAlpha = 0.50;
   ctx.fillStyle = '#000000';
+  const darkSpecks = Math.floor((w * h) / 120);
   for (let i = 0; i < darkSpecks; i++) {
     ctx.fillRect(rand() * w, rand() * h, 1, 1);
   }
 
-  // --- 3. Rolling distortion band. Classic CRT vertical hold slip —
-  //     a bright horizontal streak that drifts downward each frame.
-  //     Position derived from seed so it moves smoothly on video and
-  //     falls somewhere plausible on stills.
-  const bandH = Math.max(20, Math.floor(h * 0.06));
-  const bandY = ((seed * 3) % (h + bandH)) - bandH;
-  const bandGrad = ctx.createLinearGradient(0, bandY, 0, bandY + bandH);
-  bandGrad.addColorStop(0, 'rgba(255,255,255,0)');
-  bandGrad.addColorStop(0.5, 'rgba(255,255,255,0.22)');
-  bandGrad.addColorStop(1, 'rgba(255,255,255,0)');
-  ctx.globalAlpha = 1.0;
-  ctx.fillStyle = bandGrad;
-  ctx.fillRect(0, bandY, w, bandH);
-
-  // --- 4. RGB chromatic-aberration hint. Two thin coloured lines at
-  //     the band boundaries suggest a signal that lost sync.
-  ctx.globalAlpha = 0.55;
-  ctx.fillStyle = '#ff2a6d';
-  ctx.fillRect(0, bandY + 1, w, 1);
-  ctx.fillStyle = '#2ad4ff';
-  ctx.fillRect(0, bandY + bandH - 2, w, 1);
-
-  // --- 5. Green phosphor tint. Very light overall wash so the whole
-  //     frame carries a slight retro cast without shifting colour
-  //     recognition of what was captured.
-  ctx.globalAlpha = 0.10;
-  ctx.fillStyle = '#00ff87';
-  ctx.fillRect(0, 0, w, h);
-
-  // --- 6. Vignette. Heavier corners than before so the CRT tube
-  //     bulge reads clearly.
-  ctx.globalAlpha = 1.0;
-  const cx = w / 2;
-  const cy = h / 2;
-  const grad = ctx.createRadialGradient(
-    cx, cy, Math.min(w, h) * 0.28,
-    cx, cy, Math.max(w, h) * 0.72,
-  );
-  grad.addColorStop(0, 'rgba(0,0,0,0)');
-  grad.addColorStop(0.7, 'rgba(0,0,0,0.35)');
-  grad.addColorStop(1, 'rgba(0,0,0,0.85)');
-  ctx.fillStyle = grad;
-  ctx.fillRect(0, 0, w, h);
+  // Dark clumps (fewer, 2px)
+  ctx.globalAlpha = 0.40;
+  const darkClumps = Math.floor((w * h) / 1200);
+  for (let i = 0; i < darkClumps; i++) {
+    ctx.fillRect(rand() * w, rand() * h, 2, 2);
+  }
 
   ctx.restore();
 }
