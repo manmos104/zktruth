@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server'
-import { put } from '@vercel/blob'
+import { head, put } from '@vercel/blob'
 
 /**
  * Upload a captured photo to Vercel Blob under a deterministic key
@@ -61,13 +61,27 @@ export async function POST(request: Request) {
 
   // Guess a reasonable extension so wallets that sniff by suffix are
   // happy. Default to jpg since our capture pipeline encodes JPEG.
-  const ext = (file.type === 'image/png' ? 'png' : 'jpg')
+  const ext = file.type === 'image/png' ? 'png' : 'jpg'
+  const key = `captures/${hash}.${ext}`
+
+  // Content-addressed storage: the same hash always maps to the same
+  // bytes, so if the key already exists we're done — no re-upload
+  // needed. This also sidesteps the fact that older @vercel/blob
+  // versions don't accept `allowOverwrite: true`, which would otherwise
+  // make put() throw on a duplicate key.
+  try {
+    const existing = await head(key, { token })
+    if (existing?.url) {
+      return NextResponse.json({ url: existing.url, hash, cached: true })
+    }
+  } catch {
+    // head() throws on 404; that just means we haven't uploaded yet.
+  }
 
   try {
-    const { url } = await put(`captures/${hash}.${ext}`, file, {
+    const { url } = await put(key, file, {
       access: 'public',
       addRandomSuffix: false,
-      allowOverwrite: true,
       contentType: file.type || 'image/jpeg',
       token,
     })
