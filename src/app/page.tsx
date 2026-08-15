@@ -1745,6 +1745,31 @@ function generateTxHash() {
 }
 function getTimestamp() { return new Date().toISOString(); }
 
+// Paint the zkTruth wordmark PNG centered on the canvas at low
+// opacity — a passive watermark that survives cropping/re-sharing
+// without competing with the actual capture content. Font matches
+// the on-screen brand identity 1:1 because we're literally using the
+// same PNG asset the splash screen uses.
+function drawZkTruthWatermark(
+  ctx: CanvasRenderingContext2D,
+  w: number,
+  h: number,
+  img: HTMLImageElement | null,
+) {
+  if (!img || !img.complete || !img.naturalWidth) return;
+  ctx.save();
+  ctx.globalAlpha = 0.22;
+  // Target width ≈ 45% of the shorter edge so the wordmark reads on
+  // both landscape and portrait captures without dominating either.
+  const shortEdge = Math.min(w, h);
+  const targetW = shortEdge * 0.55;
+  const scale = targetW / img.naturalWidth;
+  const drawW = img.naturalWidth * scale;
+  const drawH = img.naturalHeight * scale;
+  ctx.drawImage(img, (w - drawW) / 2, (h - drawH) / 2, drawW, drawH);
+  ctx.restore();
+}
+
 // Paint a subtle CRT / broadcast-static texture over the current
 // canvas contents. Deliberately restrained: horizontal scanlines at
 // ~8% opacity, a light random-grain sprinkle, and a soft vignette so
@@ -2251,6 +2276,16 @@ export default function Home() {
     gps: string;
     timeStr: string;
   } | null>(null);
+  // Preloaded wordmark image used as the centered semi-transparent
+  // watermark on every capture. Loaded once on mount so we never pay
+  // decode latency inside the draw loops. Kept in a ref (not state)
+  // because the load doesn't need to trigger re-renders.
+  const wordmarkRef = useRef<HTMLImageElement | null>(null);
+  useEffect(() => {
+    const img = new window.Image();
+    img.src = '/splash-wordmark.png';
+    img.onload = () => { wordmarkRef.current = img; };
+  }, []);
   // Raw sensor-frame JPEG (data URL) captured at native resolution for
   // NFT upload. Populated on photo capture; cleared on reset. We keep
   // it in a ref rather than state because the mint flow reads it once
@@ -2678,6 +2713,8 @@ export default function Home() {
             // Optional CRT / broadcast-noise stylisation — sits under
             // the proof badges so metadata text stays legible.
             if (crtMode) drawCrtOverlay(nftCtx, nw, nh);
+            // Semi-transparent zkTruth wordmark at frame center.
+            drawZkTruthWatermark(nftCtx, nw, nh, wordmarkRef.current);
             // Bake the proof-of-capture badges directly onto the NFT
             // frame so anyone browsing the wallet sees the timestamp,
             // GPS coordinates, chain marker, and hash without having
@@ -2710,6 +2747,7 @@ export default function Home() {
           else { sh = vw / cr; sy = (vh - sh) / 2; }
           ctx.drawImage(v, sx, sy, sw, sh, 0, 0, pw, ph);
           if (crtMode) drawCrtOverlay(ctx, pw, ph);
+          drawZkTruthWatermark(ctx, pw, ph, wordmarkRef.current);
 
           // Helper: draw rounded rect (Safari-safe, no roundRect)
           function drawPill(c: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, r: number) {
@@ -2964,6 +3002,8 @@ export default function Home() {
         // the recorded video reads as live static rather than a still
         // pattern. Only runs when the user has opted in.
         if (crtMode) drawCrtOverlay(ctx, pw, ph);
+        // Center wordmark watermark on every frame.
+        drawZkTruthWatermark(ctx, pw, ph, wordmarkRef.current);
 
         // Bake proof metadata onto every frame.
         drawZkTruthOverlays(ctx, pw, ph, {
