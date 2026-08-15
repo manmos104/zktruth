@@ -1786,46 +1786,33 @@ function drawCrtOverlay(
   if (!snapCtx) return;
   snapCtx.drawImage(ctx.canvas, 0, 0);
 
-  // 2. Punch 6–10 chunky glitch strips.
-  const stripCount = 6 + Math.floor(rand() * 5);
+  // 2. Punch 3–5 subtle glitch strips (was 6–10 before — user reported
+  //    the earlier tuning was too aggressive and dominated the frame).
+  const stripCount = 3 + Math.floor(rand() * 3);
   for (let i = 0; i < stripCount; i++) {
-    const stripH = Math.max(6, Math.floor(h * (0.02 + rand() * 0.06)));
+    // Thinner strips: 0.8–2.5% of frame height so the tearing reads
+    // as intermittent interference, not a broken picture tube.
+    const stripH = Math.max(3, Math.floor(h * (0.008 + rand() * 0.017)));
     const y = Math.floor(rand() * (h - stripH));
-    // Displacement: 4%–18% of frame width, sign chosen randomly.
-    const shift = Math.floor((rand() < 0.5 ? -1 : 1) * w * (0.04 + rand() * 0.14));
+    // Smaller shift: 2–8% of frame width.
+    const shift = Math.floor((rand() < 0.5 ? -1 : 1) * w * (0.02 + rand() * 0.06));
 
-    // Solid black seam under the strip so exposed background reads as
-    // a "torn" gap rather than the pre-glitch frame bleeding through.
-    ctx.fillStyle = '#000';
-    ctx.fillRect(0, y, w, stripH);
-
-    // Blit the snapshot strip at the shifted X. It'll wrap off-canvas
-    // on one side — that's fine, the gap on the other side stays black.
+    // Blit the snapshot strip at the shifted X. We skip the pre-blit
+    // black fill so the underlying frame still shows through on the
+    // "leaving" side — reads as a soft slip rather than a hard tear.
     ctx.drawImage(snap, 0, y, w, stripH, shift, y, w, stripH);
 
-    // 3. RGB ghost — 60% of strips get a coloured duplicate offset
-    //    the OTHER direction. Uses `lighter` blending so the tint
-    //    stacks on top rather than replacing pixels.
-    if (rand() < 0.6) {
-      const ghostShift = -Math.sign(shift || 1) * Math.floor(w * (0.02 + rand() * 0.06));
+    // 3. RGB ghost — 40% of strips get a subtle coloured duplicate
+    //    (was 60% + heavier tint). Lighter blending keeps the effect
+    //    on the surface without repainting the image underneath.
+    if (rand() < 0.4) {
+      const ghostShift = -Math.sign(shift || 1) * Math.floor(w * (0.01 + rand() * 0.03));
       ctx.save();
-      ctx.globalAlpha = 0.55;
+      ctx.globalAlpha = 0.28;
       ctx.globalCompositeOperation = 'lighter';
-      // Draw the strip once tinted red, once tinted cyan, offset by a
-      // few pixels — cheap chromatic aberration.
       ctx.drawImage(snap, 0, y, w, stripH, ghostShift, y, w, stripH);
-      ctx.globalCompositeOperation = 'multiply';
-      ctx.fillStyle = rand() < 0.5 ? '#ff2a55' : '#2ad4ff';
-      ctx.fillRect(ghostShift, y, w, stripH);
       ctx.restore();
     }
-
-    // 4. Bright scanline at the top edge of the strip to sell the
-    //    "signal loss flash". One pixel is enough at high alpha.
-    ctx.fillStyle = 'rgba(255,255,255,0.85)';
-    ctx.fillRect(0, y, w, 1);
-    ctx.fillStyle = 'rgba(0,0,0,0.85)';
-    ctx.fillRect(0, y + stripH - 1, w, 1);
   }
 }
 
