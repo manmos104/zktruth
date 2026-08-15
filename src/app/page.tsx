@@ -2386,10 +2386,10 @@ export default function Home() {
       const timeStr = ts.replace('T',' ').split('.')[0] + ' UTC';
       const gps = gpsCoords;
       let finalImage: string | null = null;
-      // Raw sensor frame at native resolution — no crop, no overlays.
-      // Kept separate from `finalImage` (which is the branded 9:16
-      // share card) so the NFT can carry the actual field-of-view the
-      // camera saw, not the aspect-cropped share graphic.
+      // Clean, overlay-free JPEG cropped to match the on-screen
+      // preview's aspect ratio. This is what the NFT will carry so
+      // the wallet tile shows *exactly* what the user framed — same
+      // FOV, same portrait shape, no zkTruth watermark badges.
       let rawImage: string | null = null;
       let hash = generateHash();
 
@@ -2404,9 +2404,48 @@ export default function Home() {
         const tmpCtx = tmpC.getContext('2d');
         if (tmpCtx) {
           tmpCtx.drawImage(v, 0, 0, vw, vh);
-          const rawData = tmpC.toDataURL('image/jpeg', 0.92);
+          const rawData = tmpC.toDataURL('image/jpeg', 0.8);
           hash = await computeSHA256(rawData);
-          rawImage = rawData;
+        }
+
+        // ---- NFT-facing capture ----
+        // Snapshot the preview element's displayed aspect ratio and
+        // build a canvas of the same shape at a decent resolution.
+        // Then cover-crop the source stream into it. Because both the
+        // preview <video> and this canvas cover-crop the same source
+        // to the same aspect, the pixels we save are the pixels the
+        // user was looking at when they tapped shoot.
+        try {
+          const rect = v.getBoundingClientRect();
+          const previewAspect =
+            rect.width > 0 && rect.height > 0
+              ? rect.width / rect.height
+              : window.innerWidth / Math.max(1, window.innerHeight);
+          // 1080 px on the short edge is plenty for wallet tiles and
+          // keeps upload sizes manageable.
+          const shortEdge = 1080;
+          const nw = previewAspect < 1
+            ? shortEdge
+            : Math.round(shortEdge * previewAspect);
+          const nh = previewAspect < 1
+            ? Math.round(shortEdge / previewAspect)
+            : shortEdge;
+          const nftC = document.createElement('canvas');
+          nftC.width = nw;
+          nftC.height = nh;
+          const nftCtx = nftC.getContext('2d');
+          if (nftCtx) {
+            const vr = vw / vh;
+            const cr = nw / nh;
+            let sx = 0, sy = 0, sw = vw, sh = vh;
+            if (vr > cr) { sw = vh * cr; sx = (vw - sw) / 2; }
+            else { sh = vw / cr; sy = (vh - sh) / 2; }
+            nftCtx.drawImage(v, sx, sy, sw, sh, 0, 0, nw, nh);
+            rawImage = nftC.toDataURL('image/jpeg', 0.9);
+          }
+        } catch {
+          // If anything above trips, we simply leave rawImage null and
+          // fall back to `capturedImage` (branded 9:16) at mint time.
         }
 
         // Create portrait (9:16) canvas with watermark
@@ -2598,24 +2637,24 @@ export default function Home() {
       setCapturedVideo(null);
 
       const v = videoRef.current;
-      // Match the recording canvas to the SENSOR's native dimensions
-      // so the saved clip preserves the ultra-wide field-of-view the
-      // user is framing in the preview. Previously we forced 1080x1920
-      // (portrait 9:16) and cover-cropped the source stream, which
-      // silently chopped the horizontal FOV of iPhone's 0.5x lens.
-      //
-      // We snapshot vw/vh once at start (rather than reading them each
-      // drawFrame tick) because the canvas dimensions can't safely
-      // change mid-recording without confusing the MediaRecorder /
-      // MP4 encoder pipeline.
-      const initVw = v.videoWidth || 1080;
-      const initVh = v.videoHeight || 1920;
-      // Apply the same displayScale zoom the preview shows, so what
-      // you frame is what you save. Zoom crops symmetrically; the
-      // canvas itself stays at the source aspect ratio.
-      const zoom = Math.max(1, displayScale);
-      const pw = Math.round(initVw / zoom);
-      const ph = Math.round(initVh / zoom);
+      // Match the recording canvas to the PREVIEW element's aspect
+      // ratio so the saved clip frames the exact pixels the user was
+      // looking at while filming. Snapshotting once (rather than
+      // reading each drawFrame tick) avoids confusing MediaRecorder /
+      // the MP4 hardware encoder mid-stream — canvas dimensions must
+      // stay fixed for the life of the recording.
+      const rectV = v.getBoundingClientRect();
+      const previewAspect =
+        rectV.width > 0 && rectV.height > 0
+          ? rectV.width / rectV.height
+          : 9 / 16;
+      const shortEdge = 1080;
+      const pw = previewAspect < 1
+        ? shortEdge
+        : Math.round(shortEdge * previewAspect);
+      const ph = previewAspect < 1
+        ? Math.round(shortEdge / previewAspect)
+        : shortEdge;
 
       // Create / reuse the offscreen canvas we draw into.
       if (!recCanvasRef.current) {
@@ -2627,16 +2666,27 @@ export default function Home() {
       const ctx = rc.getContext('2d');
       if (!ctx) return;
 
-      // Draw loop: video → canvas at 1:1 (with optional centered zoom
-      // crop). No aspect-ratio remapping — canvas already matches the
-      // source aspect, so the sensor's full FOV is preserved.
+      // Draw loop: video → canvas in cover mode against the PREVIEW
+      // aspect. Cover-cropping the source to the same aspect the
+      // preview element uses guarantees "what you see is what you
+      // save" — same FOV, same framing.
       const drawFrame = () => {
-        const vw = v.videoWidth || initVw;
-        const vh = v.videoHeight || initVh;
-        const sw = vw / zoom;
-        const sh = vh / zoom;
-        const sx = (vw - sw) / 2;
-        const sy = (vh - sh) / 2;
+        const vw = v.videoWidth || 1080;
+        const vh = v.videoHeight || 1920;
+        const vr = vw / vh;
+        const cr = pw / ph;
+        let sx = 0, sy = 0, sw = vw, sh = vh;
+        if (vr > cr) { sw = vh * cr; sx = (vw - sw) / 2; }
+        else { sh = vw / cr; sy = (vh - sh) / 2; }
+
+        // Match the preview's displayScale zoom so a pinch/2x preview
+        // is reflected in the saved video too.
+        const z = displayScale;
+        if (z > 1) {
+          const zw = sw / z, zh = sh / z;
+          sx += (sw - zw) / 2; sy += (sh - zh) / 2;
+          sw = zw; sh = zh;
+        }
 
         ctx.save();
         if (facingMode === 'user') {
