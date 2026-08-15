@@ -1758,22 +1758,17 @@ function drawCrtOverlay(
   h: number,
   opts: { animateSeed?: number } = {},
 ) {
-  // "Bad signal" video-glitch effect. Instead of laying noise on top
-  // (which hides the subject), we *manipulate the already-drawn
-  // frame* — grabbing thin horizontal strips of the underlying image
-  // and re-blitting them at a horizontal offset. Reads as VHS
-  // tracking dropouts / broken transmission where the picture itself
-  // tears and slips, not as a dusty overlay.
+  // "Bad signal" video-glitch effect using a snapshot-then-reblit
+  // pattern: we copy the current frame to an offscreen scratch
+  // canvas, then paint horizontal SLICES of that scratch back onto
+  // the main canvas at shifted X positions. Because reads and
+  // writes never touch the same canvas at the same time, this
+  // works reliably across browsers (self-blit is implementation-
+  // defined and can silently fail — which was the earlier bug).
   //
-  // Each glitch strip:
-  //   - Copies a row of pixels from the frame already painted below
-  //   - Pastes it back at the same Y but shifted left/right
-  //   - Occasionally with an RGB-tinted duplicate to sell the "signal
-  //     out of sync" look without paying for a real channel split
-  //
-  // A handful of chunky-noise sparks fires on top of the torn strips
-  // for texture — but only within the strip footprint, so most of
-  // the frame stays perfectly readable.
+  // Strips are chunky (~2–8% of frame height) and displaced up to
+  // ±18% of frame width, so the tearing is impossible to miss but
+  // the untouched parts of the frame stay clean.
 
   const seed = opts.animateSeed ?? Math.floor(Date.now() / 33);
   let s = (seed * 1103515245 + 12345) & 0x7fffffff;
@@ -1782,65 +1777,56 @@ function drawCrtOverlay(
     return s / 0x7fffffff;
   };
 
-  // 4–7 glitch strips per frame.
-  const stripCount = 4 + Math.floor(rand() * 4);
-  const source = ctx.canvas;
+  // 1. Snapshot the current canvas so we can safely read from it while
+  //    we draw over the target.
+  const snap = document.createElement('canvas');
+  snap.width = w;
+  snap.height = h;
+  const snapCtx = snap.getContext('2d');
+  if (!snapCtx) return;
+  snapCtx.drawImage(ctx.canvas, 0, 0);
 
+  // 2. Punch 6–10 chunky glitch strips.
+  const stripCount = 6 + Math.floor(rand() * 5);
   for (let i = 0; i < stripCount; i++) {
-    const stripH = Math.max(2, Math.floor(h * (0.008 + rand() * 0.05)));
+    const stripH = Math.max(6, Math.floor(h * (0.02 + rand() * 0.06)));
     const y = Math.floor(rand() * (h - stripH));
-    // Horizontal shift: up to ±12% of frame width, biased away from
-    // zero so a "no-shift" strip doesn't produce a no-op.
-    const shiftMag = 0.02 + rand() * 0.10;
-    const dx = Math.floor((rand() < 0.5 ? -1 : 1) * w * shiftMag);
+    // Displacement: 4%–18% of frame width, sign chosen randomly.
+    const shift = Math.floor((rand() < 0.5 ? -1 : 1) * w * (0.04 + rand() * 0.14));
 
-    ctx.save();
-    // Re-blit the strip at the shifted X. We use drawImage(canvas,
-    // canvas) which is well-supported and treats the source as a
-    // snapshot — no read/write conflicts.
-    try {
-      ctx.drawImage(source, 0, y, w, stripH, dx, y, w, stripH);
-    } catch { /* older browsers may refuse self-blit; skip */ }
+    // Solid black seam under the strip so exposed background reads as
+    // a "torn" gap rather than the pre-glitch frame bleeding through.
+    ctx.fillStyle = '#000';
+    ctx.fillRect(0, y, w, stripH);
 
-    // Occasional coloured "ghost" copy for RGB-split flavour. Draws
-    // the same strip shifted the OTHER direction with a red or
-    // cyan tint at partial alpha.
-    if (rand() < 0.5) {
-      ctx.globalAlpha = 0.35;
+    // Blit the snapshot strip at the shifted X. It'll wrap off-canvas
+    // on one side — that's fine, the gap on the other side stays black.
+    ctx.drawImage(snap, 0, y, w, stripH, shift, y, w, stripH);
+
+    // 3. RGB ghost — 60% of strips get a coloured duplicate offset
+    //    the OTHER direction. Uses `lighter` blending so the tint
+    //    stacks on top rather than replacing pixels.
+    if (rand() < 0.6) {
+      const ghostShift = -Math.sign(shift || 1) * Math.floor(w * (0.02 + rand() * 0.06));
+      ctx.save();
+      ctx.globalAlpha = 0.55;
       ctx.globalCompositeOperation = 'lighter';
-      // Tint by drawing a coloured rectangle inside a clip mask
-      // shaped like the strip after we blit it.
-      const ghostDx = -dx;
-      try {
-        ctx.drawImage(source, 0, y, w, stripH, ghostDx, y, w, stripH);
-      } catch { /* ignore */ }
-      const tint = rand() < 0.5 ? 'rgba(255,30,60,0.35)' : 'rgba(30,220,255,0.35)';
-      ctx.globalCompositeOperation = 'source-atop';
-      ctx.fillStyle = tint;
-      ctx.fillRect(ghostDx, y, w, stripH);
+      // Draw the strip once tinted red, once tinted cyan, offset by a
+      // few pixels — cheap chromatic aberration.
+      ctx.drawImage(snap, 0, y, w, stripH, ghostShift, y, w, stripH);
+      ctx.globalCompositeOperation = 'multiply';
+      ctx.fillStyle = rand() < 0.5 ? '#ff2a55' : '#2ad4ff';
+      ctx.fillRect(ghostShift, y, w, stripH);
+      ctx.restore();
     }
 
-    // Fill the exposed gap on the "leaving" side with black so we
-    // don't leave a bare seam where the strip used to be.
-    ctx.globalAlpha = 1;
-    ctx.globalCompositeOperation = 'source-over';
-    ctx.fillStyle = '#000';
-    if (dx > 0) ctx.fillRect(0, y, dx, stripH);
-    else if (dx < 0) ctx.fillRect(w + dx, y, -dx, stripH);
-    ctx.restore();
+    // 4. Bright scanline at the top edge of the strip to sell the
+    //    "signal loss flash". One pixel is enough at high alpha.
+    ctx.fillStyle = 'rgba(255,255,255,0.85)';
+    ctx.fillRect(0, y, w, 1);
+    ctx.fillStyle = 'rgba(0,0,0,0.85)';
+    ctx.fillRect(0, y + stripH - 1, w, 1);
   }
-
-  // A very light dusting of white sparks on the strips helps the
-  // torn edges read as electrical interference. Kept small so it
-  // doesn't drift back into full-frame snow territory.
-  ctx.save();
-  ctx.fillStyle = '#ffffff';
-  ctx.globalAlpha = 0.6;
-  const sparks = Math.floor((w * h) / 4000);
-  for (let i = 0; i < sparks; i++) {
-    ctx.fillRect(rand() * w, rand() * h, 2, 1);
-  }
-  ctx.restore();
 }
 
 // Paint the zkTruth proof-of-capture overlays (top gradient, chat
