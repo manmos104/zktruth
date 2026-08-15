@@ -3498,7 +3498,15 @@ export default function Home() {
           testOnly: false,
         })
       } catch { /* fall back to raw if parsing fails */ }
-      captionLines.push(`<b>Wallet</b> · <code>${shortHash(friendlyAddr)}</code>`)
+      // TON addresses shouldn't be dressed up as `0x…` (that's an
+      // Ethereum convention) — the caller of the generic `shortHash`
+      // helper always prepends `0x`, so we shorten inline here instead
+      // to keep the UQ… prefix intact.
+      const shortTon =
+        friendlyAddr.length > 12
+          ? `${friendlyAddr.slice(0, 6)}…${friendlyAddr.slice(-4)}`
+          : friendlyAddr
+      captionLines.push(`<b>Wallet</b> · <code>${shortTon}</code>`)
     }
     const trimmedComment = captureComment?.trim()
     if (trimmedComment) {
