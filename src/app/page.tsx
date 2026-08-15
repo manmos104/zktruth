@@ -3467,6 +3467,11 @@ export default function Home() {
       setMinting(false)
       setShareStatus('Mint sent to TON — see it on tonviewer soon')
       setTimeout(() => setShareStatus(''), 6000)
+      // Mark this capture as minted so the share screen hides its
+      // "NFT MINT" button. Without this the user sees a fresh mint
+      // button right next to SHARE after they've already paid the
+      // 0.15 TON fee, which invites accidental double-mints.
+      setMintComplete(true)
       // Navigate to the share screen so the user can jump straight
       // to cross-posting / cleanup while the tx confirms in the
       // background (typical TON confirmation ≤ 10 seconds).
@@ -4679,23 +4684,30 @@ export default function Home() {
                     className="wid-verify-btn"
                     onClick={() => openSnsShare("share")}
                     style={{
-                      flex: 1,
+                      flex: mintComplete ? undefined : 1,
+                      width: mintComplete ? '100%' : undefined,
                       background: '#fff',
                       border: '1.5px solid #111',
                       color: '#111',
                       boxShadow: 'none',
                     }}
                   >SHARE</button>
-                  <button
-                    className="wid-verify-btn"
-                    onClick={() => { setScreen("minting"); startMinting(); }}
-                    style={{
-                      flex: 1,
-                      background: '#111',
-                      color: '#fff',
-                      boxShadow: '0 4px 18px rgba(0,0,0,0.18)',
-                    }}
-                  >NFT MINT</button>
+                  {/* Hide the NFT MINT button once this capture has already
+                      been minted — otherwise the user gets tempted into a
+                      duplicate mint that would cost another 0.15 TON for
+                      the same content. */}
+                  {!mintComplete && (
+                    <button
+                      className="wid-verify-btn"
+                      onClick={() => { setScreen("minting"); startMinting(); }}
+                      style={{
+                        flex: 1,
+                        background: '#111',
+                        color: '#fff',
+                        boxShadow: '0 4px 18px rgba(0,0,0,0.18)',
+                      }}
+                    >NFT MINT</button>
+                  )}
                 </div>
               </div>
             </div>
