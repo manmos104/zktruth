@@ -1744,12 +1744,149 @@ function generateTxHash() {
 }
 function getTimestamp() { return new Date().toISOString(); }
 
+// Paint the zkTruth proof-of-capture overlays (top gradient, chat
+// bubble + wordmark + LIVE pill + WORLD CHAIN pill, and the
+// timestamp/GPS/chain/hash metadata block) onto a canvas that already
+// has the capture frame drawn to it. Sizes and offsets scale off the
+// canvas short-edge so the layout looks the same on a portrait 9:16
+// canvas and a taller 9:19.5 phone-native canvas. Pulling this into
+// a helper lets both the branded share card (finalImage) and the NFT
+// capture use identical overlays without duplicating ~150 lines.
+function drawZkTruthOverlays(
+  ctx: CanvasRenderingContext2D,
+  pw: number,
+  ph: number,
+  data: { timeStr: string; gps: string; hash: string },
+) {
+  // Scale factor keyed to canvas width — the original layout was
+  // designed against a 1080-wide canvas, so `s` is 1.0 at that size
+  // and grows/shrinks proportionally elsewhere.
+  const s = pw / 1080;
+  const padL = 44 * s;
+  const topY = 100 * s;
+  const bandH = 260 * s;
+
+  // Semi-transparent gradient at top
+  const topGrad = ctx.createLinearGradient(0, 0, 0, bandH);
+  topGrad.addColorStop(0, 'rgba(0,0,0,0.7)');
+  topGrad.addColorStop(1, 'transparent');
+  ctx.fillStyle = topGrad;
+  ctx.fillRect(0, 0, pw, bandH);
+
+  // Chat-bubble icon (traced by hand — no roundRect on old Safari)
+  ctx.globalAlpha = 1.0;
+  ctx.strokeStyle = '#ffffff';
+  ctx.lineWidth = 3 * s;
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+  ctx.beginPath();
+  ctx.moveTo(padL + 28 * s, 94 * s);
+  ctx.lineTo(padL + 28 * s, 74 * s);
+  ctx.arcTo(padL + 28 * s, 66 * s, padL + 20 * s, 66 * s, 4 * s);
+  ctx.lineTo(padL + 4 * s, 66 * s);
+  ctx.arcTo(padL, 66 * s, padL, 70 * s, 4 * s);
+  ctx.lineTo(padL, 90 * s);
+  ctx.arcTo(padL, 94 * s, padL + 4 * s, 94 * s, 4 * s);
+  ctx.lineTo(padL + 4 * s, 94 * s);
+  ctx.lineTo(padL, 100 * s);
+  ctx.lineTo(padL + 10 * s, 94 * s);
+  ctx.lineTo(padL + 24 * s, 94 * s);
+  ctx.arcTo(padL + 28 * s, 94 * s, padL + 28 * s, 90 * s, 4 * s);
+  ctx.stroke();
+  // Check mark inside the bubble
+  ctx.strokeStyle = '#00c864';
+  ctx.lineWidth = 3.5 * s;
+  ctx.beginPath();
+  ctx.moveTo(padL + 8 * s, 80 * s);
+  ctx.lineTo(padL + 12 * s, 84 * s);
+  ctx.lineTo(padL + 20 * s, 76 * s);
+  ctx.stroke();
+
+  // "zkTruth" wordmark
+  ctx.globalAlpha = 1.0;
+  ctx.font = `italic ${32 * s}px sans-serif`;
+  ctx.fillStyle = 'rgba(255,255,255,0.75)';
+  const zkW = ctx.measureText('zk').width;
+  ctx.fillText('zk', padL + 36 * s, topY);
+  ctx.font = `italic bold ${32 * s}px sans-serif`;
+  ctx.fillStyle = '#ffffff';
+  ctx.fillText('Truth', padL + 36 * s + zkW, topY);
+  const truthEnd = padL + 36 * s + zkW + ctx.measureText('Truth').width + 12 * s;
+
+  // Rounded-rect helper — inlined here so this helper stays self-contained.
+  const drawPill = (
+    x: number, y: number, w: number, h: number, r: number,
+  ) => {
+    ctx.beginPath();
+    ctx.moveTo(x + r, y);
+    ctx.lineTo(x + w - r, y);
+    ctx.arcTo(x + w, y, x + w, y + r, r);
+    ctx.lineTo(x + w, y + h - r);
+    ctx.arcTo(x + w, y + h, x + w - r, y + h, r);
+    ctx.lineTo(x + r, y + h);
+    ctx.arcTo(x, y + h, x, y + h - r, r);
+    ctx.lineTo(x, y + r);
+    ctx.arcTo(x, y, x + r, y, r);
+    ctx.closePath();
+  };
+
+  // LIVE badge (red pill)
+  const liveX = truthEnd + 8 * s;
+  const liveY = topY - 18 * s;
+  const liveW = 72 * s;
+  const liveH = 28 * s;
+  ctx.fillStyle = '#ff3b5c';
+  drawPill(liveX, liveY, liveW, liveH, 14 * s);
+  ctx.fill();
+  ctx.fillStyle = '#ffffff';
+  ctx.beginPath();
+  ctx.arc(liveX + 14 * s, liveY + 14 * s, 4 * s, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.font = `bold ${14 * s}px monospace`;
+  ctx.fillStyle = '#ffffff';
+  ctx.fillText('LIVE', liveX + 24 * s, liveY + 19 * s);
+
+  // WORLD CHAIN badge (top-right)
+  const chainText = 'WORLD CHAIN';
+  ctx.font = `${14 * s}px monospace`;
+  const chainW = ctx.measureText(chainText).width + 24 * s;
+  const chainX = pw - padL - chainW;
+  const chainY = liveY;
+  ctx.strokeStyle = 'rgba(0,200,255,0.5)';
+  ctx.lineWidth = 1.5 * s;
+  drawPill(chainX, chainY, chainW, liveH, 14 * s);
+  ctx.stroke();
+  ctx.fillStyle = 'rgba(0,200,255,0.1)';
+  drawPill(chainX, chainY, chainW, liveH, 14 * s);
+  ctx.fill();
+  ctx.fillStyle = '#00c8ff';
+  ctx.fillText(chainText, chainX + 12 * s, chainY + 19 * s);
+
+  // Metadata rows
+  const accentGreen = '#00ff87';
+  const fontSize = 22 * s;
+  const lineGap = 36 * s;
+  const startY = 170 * s;
+
+  ctx.font = `${fontSize}px monospace`;
+  ctx.fillStyle = accentGreen;
+  ctx.globalAlpha = 0.6;
+  ctx.fillText('⏱ ' + data.timeStr, padL, startY);
+  ctx.fillText('📍 ' + data.gps, padL, startY + lineGap);
+  ctx.fillText('⛓ WORLD CHAIN READY', padL, startY + lineGap * 2);
+  ctx.fillText('🔒 SHA-256: ' + data.hash.slice(0, 18) + '...', padL, startY + lineGap * 3);
+  ctx.globalAlpha = 1.0;
+}
+
 // Grab the first drawable frame of a video Blob and encode it as a
 // JPEG. Used to synthesise a static poster for video NFTs so wallets
 // that only render `image` (not `animation_url`) still show the
 // actual capture instead of the fallback logo. Returns null when the
 // browser can't decode the video (e.g. codec unsupported).
-async function extractFirstFrameJpeg(video: Blob): Promise<Blob | null> {
+async function extractFirstFrameJpeg(
+  video: Blob,
+  overlay?: { timeStr: string; gps: string; hash: string },
+): Promise<Blob | null> {
   const url = URL.createObjectURL(video)
   try {
     return await new Promise<Blob | null>((resolve) => {
@@ -1781,6 +1918,10 @@ async function extractFirstFrameJpeg(video: Blob): Promise<Blob | null> {
           const ctx = canvas.getContext('2d')
           if (!ctx) return done(null)
           ctx.drawImage(el, 0, 0, w, h)
+          // Bake the timestamp / GPS / chain / hash badges directly
+          // onto the poster so wallet tiles look identical to photo
+          // NFTs — the video itself stays clean for playback.
+          if (overlay) drawZkTruthOverlays(ctx, w, h, overlay)
           canvas.toBlob(
             (b) => {
               clearTimeout(timeout)
@@ -2441,6 +2582,13 @@ export default function Home() {
             if (vr > cr) { sw = vh * cr; sx = (vw - sw) / 2; }
             else { sh = vw / cr; sy = (vh - sh) / 2; }
             nftCtx.drawImage(v, sx, sy, sw, sh, 0, 0, nw, nh);
+            // Bake the proof-of-capture badges directly onto the NFT
+            // frame so anyone browsing the wallet sees the timestamp,
+            // GPS coordinates, chain marker, and hash without having
+            // to open the metadata JSON. Positions/sizes scale with
+            // the canvas so the layout stays balanced regardless of
+            // the preview aspect ratio we snapshotted.
+            drawZkTruthOverlays(nftCtx, nw, nh, { timeStr, gps, hash });
             rawImage = nftC.toDataURL('image/jpeg', 0.9);
           }
         } catch {
@@ -3077,7 +3225,18 @@ export default function Home() {
         if (/^video\//i.test(uploadBlob.type)) {
           try {
             setShareStatus('EXTRACTING VIDEO THUMBNAIL...')
-            const posterBlob = await extractFirstFrameJpeg(uploadBlob)
+            // Feed the same proof metadata into the poster so its
+            // badges match the photo NFT layout — timestamp comes
+            // straight from the capture, GPS from the live coords,
+            // hash from proofData.
+            const overlayTs = (proofData?.timestamp ?? getTimestamp())
+              .replace('T', ' ')
+              .split('.')[0] + ' UTC'
+            const posterBlob = await extractFirstFrameJpeg(uploadBlob, {
+              timeStr: overlayTs,
+              gps: gpsCoords || '—',
+              hash: contentHashHex,
+            })
             if (posterBlob) {
               const posterPath = `captures/${contentHashHex}.jpg`
               await upload(posterPath, posterBlob, {
@@ -3152,6 +3311,7 @@ export default function Home() {
     lastTelegramPostUrl,
     capturedImage,
     capturedVideo,
+    gpsCoords,
   ]);
 
   const openSnsShare = useCallback((from: string) => {
