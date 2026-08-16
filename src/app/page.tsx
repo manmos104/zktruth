@@ -1976,6 +1976,52 @@ function drawZkTruthOverlays(
 // that only render `image` (not `animation_url`) still show the
 // actual capture instead of the fallback logo. Returns null when the
 // browser can't decode the video (e.g. codec unsupported).
+// Probe a video Blob for its native pixel dimensions and duration.
+// Telegram's sendVideo endpoint infers aspect ratio from the file's
+// container header, but iOS Safari's MediaRecorder sometimes omits
+// or mislabels the SPS, which makes Telegram fall back to 16:9 and
+// vertically squash portrait clips. Passing width/height/duration
+// explicitly forces the correct box in the channel preview.
+//
+// Returns null when the video can't be decoded (e.g. codec unsupported).
+async function probeVideoMeta(video: Blob): Promise<{ width: number; height: number; duration: number } | null> {
+  const url = URL.createObjectURL(video)
+  try {
+    return await new Promise<{ width: number; height: number; duration: number } | null>((resolve) => {
+      const el = document.createElement('video')
+      el.muted = true
+      el.playsInline = true
+      el.preload = 'metadata'
+      el.src = url
+
+      let done = false
+      const finish = (v: { width: number; height: number; duration: number } | null) => {
+        if (done) return
+        done = true
+        resolve(v)
+      }
+
+      const t = setTimeout(() => finish(null), 6000)
+      el.addEventListener('loadedmetadata', () => {
+        clearTimeout(t)
+        const w = el.videoWidth
+        const h = el.videoHeight
+        // Duration can be Infinity on iOS for MediaRecorder-produced
+        // MP4 headers; clamp to a sane default so Telegram doesn't
+        // get a nonsense value.
+        const d = Number.isFinite(el.duration) && el.duration > 0
+          ? Math.round(el.duration)
+          : 0
+        if (!w || !h) return finish(null)
+        finish({ width: w, height: h, duration: d })
+      }, { once: true })
+      el.addEventListener('error', () => { clearTimeout(t); finish(null) }, { once: true })
+    })
+  } finally {
+    URL.revokeObjectURL(url)
+  }
+}
+
 async function extractFirstFrameJpeg(
   video: Blob,
   overlay?: { timeStr: string; gps: string; hash: string },
@@ -3690,13 +3736,29 @@ export default function Home() {
     // Uploader helper used for both the primary attempt and the
     // sendVideo fallback below. Rebuilds the form each time so a
     // consumed body / stale field state can't sabotage retries.
+    // For videos, probe native pixel dimensions + duration so Telegram
+    // renders the channel preview at the correct aspect ratio. Without
+    // these params, iOS-Safari-produced MP4s can be interpreted as 16:9
+    // and vertically squashed regardless of the real portrait geometry.
+    let videoMeta: { width: number; height: number; duration: number } | null = null
+    if (isMp4Video || isOtherVideo) {
+      try { videoMeta = await probeVideoMeta(mediaBlob) } catch { videoMeta = null }
+    }
+
     const uploadTo = async (methodName: string, field: string) => {
       const f = new FormData()
       f.set('chat_id', CHANNEL_ID)
       f.set(field, mediaBlob, mediaName)
       f.set('caption', caption)
       f.set('parse_mode', 'HTML')
-      if (methodName === 'sendVideo') f.set('supports_streaming', 'true')
+      if (methodName === 'sendVideo') {
+        f.set('supports_streaming', 'true')
+        if (videoMeta) {
+          f.set('width', String(videoMeta.width))
+          f.set('height', String(videoMeta.height))
+          if (videoMeta.duration > 0) f.set('duration', String(videoMeta.duration))
+        }
+      }
       const r = await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/${methodName}`, {
         method: 'POST',
         body: f,
