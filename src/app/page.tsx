@@ -6,6 +6,7 @@ import { useMintVerifiedProof, useMintUnverifiedProof, toBytes32Hash, hashGps } 
 import { ZKTRUTH_CONTRACT_ADDRESS } from '@/lib/contract';
 import { WorldIdVerifyButton } from '@/lib/worldid';
 import { useTelegramBackButton } from './hooks/useTelegramBackButton';
+import { useTelegramExpand } from './hooks/useTelegramExpand';
 import { useTonConnectUI, useTonWallet } from '@tonconnect/ui-react';
 import { upload } from '@vercel/blob/client';
 import { Address } from '@ton/core';
@@ -2058,6 +2059,12 @@ const MINT_STEPS = [
 ];
 
 export default function Home() {
+  // Initialise the Telegram Mini App runtime: expand to full height,
+  // paint the Telegram header background to match our dark canvas,
+  // disable accidental swipe-to-close, and request true fullscreen
+  // where supported. Fixes the "UI shoved down" difference between
+  // OPEN-button vs Menu-Button launches.
+  useTelegramExpand();
   const { address, isConnected } = useAccount();
   const { disconnect } = useDisconnect();
   const openConnectModal = () => { alert('Wallet connect coming soon'); };
