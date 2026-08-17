@@ -2120,6 +2120,17 @@ export default function Home() {
   const [capturing, setCapturing] = useState(false);
   const [flash, setFlash] = useState(false);
   const [capturedImage, setCapturedImage] = useState<string | null>(null);
+  // Trust Score for the currently-connected TON wallet. Fetched on
+  // connect + refreshed after every successful mint so the sidebar
+  // chip always reflects the freshest number.
+  const [trustScore, setTrustScore] = useState<{
+    score: number
+    tier: 'Bronze' | 'Silver' | 'Gold' | 'Platinum'
+    posts: number
+    reactionsTotal: number
+    sharesTotal: number
+  } | null>(null);
+  const [trustProfileOpen, setTrustProfileOpen] = useState(false);
   const [mintStep, setMintStep] = useState(0);
   const [mintComplete, setMintComplete] = useState(false);
   const [proofData, setProofData] = useState<any>(null);
@@ -3309,6 +3320,32 @@ export default function Home() {
     ? `${tonWallet.account.address.slice(0, 4)}...${tonWallet.account.address.slice(-4)}`
     : null;
 
+  // Fetch Trust Score whenever the wallet address changes AND after
+  // every successful mint (mintComplete flips true). Keeps the sidebar
+  // chip in sync with server-side state without polling.
+  useEffect(() => {
+    const raw = tonWallet?.account.address
+    if (!raw) { setTrustScore(null); return }
+    let cancelled = false
+    ;(async () => {
+      try {
+        const r = await fetch(`/api/trust/${encodeURIComponent(raw)}`)
+        if (!r.ok) return
+        const j = await r.json()
+        if (!cancelled) {
+          setTrustScore({
+            score: j.score,
+            tier: j.tier,
+            posts: j.posts,
+            reactionsTotal: j.reactionsTotal,
+            sharesTotal: j.sharesTotal,
+          })
+        }
+      } catch { /* offline / cold KV — leave as null */ }
+    })()
+    return () => { cancelled = true }
+  }, [tonWallet?.account.address, mintComplete]);
+
   // Coordinator callbacks for the real IDKit-backed WorldIdVerifyButton.
   // The widget itself owns the modal + server-verify call; we just react to
   // state transitions to drive the rest of the mint flow.
@@ -3525,6 +3562,24 @@ export default function Home() {
       // button right next to SHARE after they've already paid the
       // 0.15 TON fee, which invites accidental double-mints.
       setMintComplete(true)
+
+      // Credit the mint against the author's Trust Score. Fire-and-
+      // forget — a Trust API failure shouldn't block the share flow.
+      // The messageId comes from the earlier Telegram channel post
+      // (extracted the same way the on-chain mint payload uses it).
+      try {
+        const trustMsgId = Number(messageIdFromPostUrl(lastTelegramPostUrl ?? undefined))
+        if (tonWallet?.account.address && Number.isFinite(trustMsgId) && trustMsgId > 0) {
+          void fetch('/api/trust/mint', {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({
+              wallet: tonWallet.account.address,
+              messageId: trustMsgId,
+            }),
+          }).catch(() => { /* non-blocking */ })
+        }
+      } catch { /* trust hook is best-effort */ }
       // Navigate to the share screen so the user can jump straight
       // to cross-posting / cleanup while the tx confirms in the
       // background (typical TON confirmation ≤ 10 seconds).
@@ -4192,6 +4247,44 @@ export default function Home() {
                 <button className="side-btn" onClick={flipCamera}><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{width:22,height:22}}><path d="M1 4v6h6"/><path d="M23 20v-6h-6"/><path d="M20.49 9A9 9 0 0 0 5.64 5.64L1 10m22 4-4.64 4.36A9 9 0 0 1 3.51 15"/></svg></button>
                 <div className="side-btn-label">FLIP</div>
               </div>
+              {/* Trust Score chip. Shows the connected wallet's tier
+                  and current score. Tap to open the profile modal with
+                  the full breakdown (posts / reactions / shares). */}
+              {tonWallet && (
+                <div>
+                  <button
+                    className="side-btn"
+                    onClick={() => setTrustProfileOpen(true)}
+                    aria-label="Open Trust Score profile"
+                    style={{
+                      color: trustScore
+                        ? (trustScore.tier === 'Platinum' ? '#e5e4e2'
+                          : trustScore.tier === 'Gold' ? '#ffd700'
+                          : trustScore.tier === 'Silver' ? '#c0c0c0'
+                          : '#cd7f32')
+                        : '#888',
+                      borderColor: trustScore && trustScore.tier !== 'Bronze'
+                        ? 'rgba(255,215,0,0.4)'
+                        : undefined,
+                      fontFamily: 'monospace',
+                      fontSize: 13,
+                      fontWeight: 700,
+                    }}
+                  >
+                    {trustScore ? Math.round(trustScore.score) : '—'}
+                  </button>
+                  <div
+                    className="side-btn-label"
+                    style={{
+                      color: trustScore && trustScore.tier !== 'Bronze'
+                        ? '#ffd700'
+                        : undefined,
+                    }}
+                  >
+                    {trustScore?.tier ?? 'TRUST'}
+                  </div>
+                </div>
+              )}
               {/* CRT / broadcast-noise toggle. Off by default (evidence
                   first); flipping it on adds scanlines + grain +
                   vignette to captures for a retro TV aesthetic. Choice
@@ -4844,6 +4937,116 @@ export default function Home() {
                   <span>🔗</span> COPY LINK
                 </button>
                 <div className="sns-copy-status">{copyStatus}</div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Trust Score profile modal. Tapping the sidebar chip opens
+            this — shows the full breakdown (posts / reactions / shares)
+            plus the current tier badge. Data is fetched from the KV-
+            backed /api/trust/<wallet> endpoint whenever the wallet or
+            mintComplete flag changes. */}
+        {trustProfileOpen && (
+          <div
+            className="privacy-modal-backdrop"
+            onClick={() => setTrustProfileOpen(false)}
+          >
+            <div
+              className="privacy-modal"
+              onClick={(e) => e.stopPropagation()}
+              style={{ maxWidth: 360 }}
+            >
+              <button
+                className="privacy-modal-close"
+                onClick={() => setTrustProfileOpen(false)}
+                aria-label="Close"
+              >✕</button>
+              <div style={{ padding: '20px 24px 8px', textAlign: 'center' }}>
+                <div style={{
+                  fontFamily: 'monospace',
+                  fontSize: 11,
+                  letterSpacing: 1.2,
+                  color: '#888',
+                  marginBottom: 6,
+                }}>
+                  TRUST SCORE
+                </div>
+                <div style={{
+                  fontFamily: 'monospace',
+                  fontSize: 56,
+                  fontWeight: 700,
+                  lineHeight: 1,
+                  color: trustScore?.tier === 'Platinum' ? '#e5e4e2'
+                    : trustScore?.tier === 'Gold' ? '#ffd700'
+                    : trustScore?.tier === 'Silver' ? '#c0c0c0'
+                    : '#cd7f32',
+                  textShadow: trustScore && trustScore.tier !== 'Bronze'
+                    ? '0 0 20px rgba(255,215,0,0.35)'
+                    : undefined,
+                }}>
+                  {trustScore ? Math.round(trustScore.score) : '—'}
+                </div>
+                <div style={{
+                  fontSize: 14,
+                  fontWeight: 700,
+                  letterSpacing: 2,
+                  marginTop: 8,
+                  color: '#fff',
+                }}>
+                  {trustScore?.tier ?? 'BRONZE'} TIER
+                </div>
+                {shortTonAddr && (
+                  <div style={{ fontFamily: 'monospace', fontSize: 11, color: '#666', marginTop: 6 }}>
+                    {shortTonAddr}
+                  </div>
+                )}
+              </div>
+              <div style={{ padding: '16px 24px 20px' }}>
+                <div style={{
+                  display: 'grid',
+                  gridTemplateColumns: 'repeat(3, 1fr)',
+                  gap: 8,
+                  marginBottom: 14,
+                }}>
+                  {[
+                    { label: 'POSTS',     value: trustScore?.posts ?? 0,          weight: 2 },
+                    { label: 'REACTIONS', value: trustScore?.reactionsTotal ?? 0, weight: 8 },
+                    { label: 'SHARES',    value: trustScore?.sharesTotal ?? 0,    weight: 10 },
+                  ].map((it) => (
+                    <div key={it.label} style={{
+                      background: 'rgba(255,255,255,0.04)',
+                      border: '1px solid rgba(255,255,255,0.08)',
+                      borderRadius: 10,
+                      padding: '10px 6px',
+                      textAlign: 'center',
+                    }}>
+                      <div style={{ fontFamily: 'monospace', fontSize: 22, fontWeight: 700, color: '#00ff87' }}>
+                        {it.value}
+                      </div>
+                      <div style={{ fontSize: 10, letterSpacing: 1, color: '#888', marginTop: 4 }}>
+                        {it.label}
+                      </div>
+                      <div style={{ fontSize: 9, color: '#555', marginTop: 2 }}>
+                        ×{it.weight}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+                <div style={{
+                  fontSize: 11,
+                  lineHeight: 1.6,
+                  color: '#888',
+                  padding: '10px 12px',
+                  background: 'rgba(255,255,255,0.03)',
+                  borderRadius: 8,
+                }}>
+                  Score = posts × 2 + reactions × 8 + shares × 10, with time decay.
+                  Older activity loses weight; recent engagement drives your tier.
+                  <div style={{ marginTop: 8, color: '#666' }}>
+                    Tiers · Bronze (0-49) · Silver (50-199) · Gold (200-999) · Platinum (1000+)
+                  </div>
+                </div>
               </div>
             </div>
           </div>
