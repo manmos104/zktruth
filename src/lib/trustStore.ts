@@ -169,9 +169,46 @@ function decay(now: number, timestamp: number): number {
   return 1 / (1 + days * 0.05)
 }
 
+// Trust tier — journalism / investigative-reporter progression.
+// Chosen over the earlier Bronze/Silver/Gold metals so the ladder
+// reinforces the "Proof of Capture = reporting" narrative rather than
+// looking like a generic game score. Emoji + colour also drive the
+// sidebar chip and the profile modal badge.
+export type TrustTier =
+  | 'Source'                 // 0–49       — anonymous informant
+  | 'Whistleblower'          // 50–199     — steps forward publicly
+  | 'Muckraker'              // 200–999    — digs up buried stories
+  | 'Investigative Reporter' // 1000–4999  — established investigator
+  | 'Truth-Teller'           // 5000+      — canonical truth-source
+
+export interface TierMeta {
+  tier: TrustTier
+  emoji: string
+  color: string       // primary text color for chip / badge
+  glow: string        // subtle text-shadow color for higher tiers
+  min: number
+}
+
+export const TIERS: TierMeta[] = [
+  { tier: 'Source',                 emoji: '🕯', color: '#8b8b8b', glow: 'transparent',           min: 0 },
+  { tier: 'Whistleblower',          emoji: '📢', color: '#4dd4ff', glow: 'rgba(77,212,255,0.35)', min: 50 },
+  { tier: 'Muckraker',              emoji: '🔦', color: '#ffcf5c', glow: 'rgba(255,207,92,0.35)', min: 200 },
+  { tier: 'Investigative Reporter', emoji: '🔍', color: '#ff7a4d', glow: 'rgba(255,122,77,0.4)',  min: 1000 },
+  { tier: 'Truth-Teller',           emoji: '⚖️', color: '#00ff87', glow: 'rgba(0,255,135,0.5)',   min: 5000 },
+]
+
+export function tierForScore(score: number): TierMeta {
+  let match = TIERS[0]
+  for (const t of TIERS) {
+    if (score >= t.min) match = t
+  }
+  return match
+}
+
 export interface TrustBreakdown {
   score: number
-  tier: 'Bronze' | 'Silver' | 'Gold' | 'Platinum'
+  tier: TrustTier
+  emoji: string
   posts: number
   reactionsTotal: number
   sharesTotal: number
@@ -182,9 +219,11 @@ export interface TrustBreakdown {
 
 export function computeScore(user: UserRecord | null, now = Date.now()): TrustBreakdown {
   if (!user) {
+    const t = tierForScore(0)
     return {
       score: 0,
-      tier: 'Bronze',
+      tier: t.tier,
+      emoji: t.emoji,
       posts: 0,
       reactionsTotal: 0,
       sharesTotal: 0,
@@ -207,16 +246,12 @@ export function computeScore(user: UserRecord | null, now = Date.now()): TrustBr
     0,
   )
   const score = Math.max(0, Math.round((postsScore + reactionsScore + sharesScore) * 10) / 10)
-
-  const tier: TrustBreakdown['tier'] =
-    score >= 1000 ? 'Platinum'
-    : score >= 200 ? 'Gold'
-    : score >= 50  ? 'Silver'
-    : 'Bronze'
+  const meta = tierForScore(score)
 
   return {
     score,
-    tier,
+    tier: meta.tier,
+    emoji: meta.emoji,
     posts: user.posts.length,
     reactionsTotal: user.reactions.reduce((s, r) => s + r.delta, 0),
     sharesTotal: user.shares.reduce((s, sh) => s + sh.weight, 0),

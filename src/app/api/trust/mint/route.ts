@@ -47,29 +47,33 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 })
   }
   const rawWallet = body?.wallet
-  const messageId = body?.messageId
+  const messageIdRaw = body?.messageId
   if (!rawWallet || typeof rawWallet !== 'string') {
     return NextResponse.json({ error: 'wallet is required' }, { status: 400 })
   }
-  if (!messageId || typeof messageId !== 'number' || !Number.isFinite(messageId)) {
-    return NextResponse.json({ error: 'messageId must be a positive number' }, { status: 400 })
-  }
   const wallet = normaliseWallet(rawWallet)
   const now = Date.now()
+  // messageId is OPTIONAL: users can mint without a Telegram post (e.g.
+  // if they'll share later). A post still counts toward Trust; we just
+  // skip the message→wallet mapping when the id is missing.
+  const messageId =
+    typeof messageIdRaw === 'number' && Number.isFinite(messageIdRaw) && messageIdRaw > 0
+      ? messageIdRaw
+      : 0
 
   try {
-    // Store message → wallet mapping so the reaction webhook can
-    // find the author when reactions come in later.
-    const msgRec: MessageRecord = {
-      messageId,
-      wallet,
-      postedAt: now,
-      lastViews: 0,
-      lastReactionSignature: '',
+    if (messageId > 0) {
+      const msgRec: MessageRecord = {
+        messageId,
+        wallet,
+        postedAt: now,
+        lastViews: 0,
+        lastReactionSignature: '',
+      }
+      await saveMessageRecord(msgRec)
     }
-    await saveMessageRecord(msgRec)
 
-    // Credit the wallet with a post event.
+    // Credit the wallet with a post event either way.
     await appendPost(wallet, { messageId, timestamp: now })
 
     return NextResponse.json({ ok: true, wallet, messageId })

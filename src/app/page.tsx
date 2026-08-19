@@ -2121,15 +2121,17 @@ export default function Home() {
   const [flash, setFlash] = useState(false);
   const [capturedImage, setCapturedImage] = useState<string | null>(null);
   // Trust Score for the currently-connected TON wallet. Fetched on
-  // connect + refreshed after every successful mint so the sidebar
-  // chip always reflects the freshest number.
+  // connect + refreshed after every successful mint / poll tick so the
+  // sidebar chip always reflects the freshest number.
   const [trustScore, setTrustScore] = useState<{
     score: number
-    tier: 'Bronze' | 'Silver' | 'Gold' | 'Platinum'
+    tier: 'Source' | 'Whistleblower' | 'Muckraker' | 'Investigative Reporter' | 'Truth-Teller'
+    emoji: string
     posts: number
     reactionsTotal: number
     sharesTotal: number
   } | null>(null);
+  const [trustRefreshCount, setTrustRefreshCount] = useState(0);
   const [trustProfileOpen, setTrustProfileOpen] = useState(false);
   const [mintStep, setMintStep] = useState(0);
   const [mintComplete, setMintComplete] = useState(false);
@@ -3320,22 +3322,28 @@ export default function Home() {
     ? `${tonWallet.account.address.slice(0, 4)}...${tonWallet.account.address.slice(-4)}`
     : null;
 
-  // Fetch Trust Score whenever the wallet address changes AND after
-  // every successful mint (mintComplete flips true). Keeps the sidebar
-  // chip in sync with server-side state without polling.
+  // Fetch Trust Score whenever the wallet changes, after every successful
+  // mint (mintComplete → true), whenever the profile modal opens (manual
+  // refresh), and on an explicit refresh trigger (setTrustRefreshCount).
+  // Bypasses the CDN cache with a per-request timestamp so a mint that
+  // just completed shows up right away instead of after the 30s TTL.
   useEffect(() => {
     const raw = tonWallet?.account.address
     if (!raw) { setTrustScore(null); return }
     let cancelled = false
     ;(async () => {
       try {
-        const r = await fetch(`/api/trust/${encodeURIComponent(raw)}`)
+        const r = await fetch(
+          `/api/trust/${encodeURIComponent(raw)}?t=${Date.now()}`,
+          { cache: 'no-store' },
+        )
         if (!r.ok) return
         const j = await r.json()
         if (!cancelled) {
           setTrustScore({
             score: j.score,
             tier: j.tier,
+            emoji: j.emoji ?? '🕯',
             posts: j.posts,
             reactionsTotal: j.reactionsTotal,
             sharesTotal: j.sharesTotal,
@@ -3344,7 +3352,7 @@ export default function Home() {
       } catch { /* offline / cold KV — leave as null */ }
     })()
     return () => { cancelled = true }
-  }, [tonWallet?.account.address, mintComplete]);
+  }, [tonWallet?.account.address, mintComplete, trustProfileOpen, trustRefreshCount]);
 
   // Coordinator callbacks for the real IDKit-backed WorldIdVerifyButton.
   // The widget itself owns the modal + server-verify call; we just react to
@@ -3563,21 +3571,27 @@ export default function Home() {
       // 0.15 TON fee, which invites accidental double-mints.
       setMintComplete(true)
 
-      // Credit the mint against the author's Trust Score. Fire-and-
-      // forget — a Trust API failure shouldn't block the share flow.
-      // The messageId comes from the earlier Telegram channel post
-      // (extracted the same way the on-chain mint payload uses it).
+      // Credit the mint against the author's Trust Score, then force
+      // an immediate score refetch so the sidebar chip and profile
+      // modal reflect the +2 post credit without waiting for the next
+      // navigation. Fire-and-forget on the network call itself so a
+      // Trust API failure doesn't block the share flow.
       try {
         const trustMsgId = Number(messageIdFromPostUrl(lastTelegramPostUrl ?? undefined))
-        if (tonWallet?.account.address && Number.isFinite(trustMsgId) && trustMsgId > 0) {
-          void fetch('/api/trust/mint', {
+        if (tonWallet?.account.address) {
+          // Always credit the mint even if the user hasn't posted to
+          // Telegram yet (messageId 0). The endpoint gracefully treats
+          // 0 as "no post link" and still records the post event.
+          fetch('/api/trust/mint', {
             method: 'POST',
             headers: { 'content-type': 'application/json' },
             body: JSON.stringify({
               wallet: tonWallet.account.address,
-              messageId: trustMsgId,
+              messageId: Number.isFinite(trustMsgId) && trustMsgId > 0 ? trustMsgId : 0,
             }),
-          }).catch(() => { /* non-blocking */ })
+          })
+            .then(() => setTrustRefreshCount((n) => n + 1))
+            .catch(() => { /* non-blocking */ })
         }
       } catch { /* trust hook is best-effort */ }
       // Navigate to the share screen so the user can jump straight
@@ -3712,7 +3726,34 @@ export default function Home() {
           ? gpsCoords
           : undefined)
       : undefined
-    const captionLines: string[] = ['✓ <b>Verified Proof of Capture</b>', '']
+    // Fetch the caller's live Trust Score right before we build the
+    // caption so the badge on top matches what the profile modal shows.
+    // Best-effort — if the KV/API is cold we simply omit the badge line
+    // (skipping is nicer than showing a stale 0-Source tag).
+    let trustBadgeLine: string | null = null
+    if (tonWallet?.account.address) {
+      try {
+        const tr = await fetch(
+          `/api/trust/${encodeURIComponent(tonWallet.account.address)}?t=${Date.now()}`,
+          { cache: 'no-store' },
+        )
+        if (tr.ok) {
+          const tj = await tr.json() as {
+            score?: number; tier?: string; emoji?: string
+          }
+          if (typeof tj.score === 'number' && tj.tier) {
+            // Header line is intentionally short + emphatic so it reads
+            // at a glance in the channel feed.
+            trustBadgeLine = `${tj.emoji ?? '🕯'} <b>${tj.tier}</b> · <code>${Math.round(tj.score)}</code>`
+          }
+        }
+      } catch { /* offline — no badge, no problem */ }
+    }
+    const captionLines: string[] = []
+    if (trustBadgeLine) {
+      captionLines.push(trustBadgeLine, '')
+    }
+    captionLines.push('✓ <b>Verified Proof of Capture</b>', '')
     if (proofData?.hash) {
       captionLines.push(`<b>Hash</b> · <code>${shortHash(proofData.hash)}</code>`)
     }
@@ -4248,43 +4289,56 @@ export default function Home() {
                 <div className="side-btn-label">FLIP</div>
               </div>
               {/* Trust Score chip. Shows the connected wallet's tier
-                  and current score. Tap to open the profile modal with
-                  the full breakdown (posts / reactions / shares). */}
-              {tonWallet && (
-                <div>
-                  <button
-                    className="side-btn"
-                    onClick={() => setTrustProfileOpen(true)}
-                    aria-label="Open Trust Score profile"
-                    style={{
-                      color: trustScore
-                        ? (trustScore.tier === 'Platinum' ? '#e5e4e2'
-                          : trustScore.tier === 'Gold' ? '#ffd700'
-                          : trustScore.tier === 'Silver' ? '#c0c0c0'
-                          : '#cd7f32')
-                        : '#888',
-                      borderColor: trustScore && trustScore.tier !== 'Bronze'
-                        ? 'rgba(255,215,0,0.4)'
-                        : undefined,
-                      fontFamily: 'monospace',
-                      fontSize: 13,
-                      fontWeight: 700,
-                    }}
-                  >
-                    {trustScore ? Math.round(trustScore.score) : '—'}
-                  </button>
-                  <div
-                    className="side-btn-label"
-                    style={{
-                      color: trustScore && trustScore.tier !== 'Bronze'
-                        ? '#ffd700'
-                        : undefined,
-                    }}
-                  >
-                    {trustScore?.tier ?? 'TRUST'}
+                  emoji + current score. Tap to open the profile modal
+                  with the full breakdown (posts / reactions / shares).
+                  Colour ramps from grey (Source) → cyan (Whistleblower)
+                  → gold (Muckraker) → orange (Investigator) → green
+                  (Truth-Teller) so higher tiers stand out at a glance. */}
+              {tonWallet && (() => {
+                const tierColor = trustScore
+                  ? (trustScore.tier === 'Truth-Teller' ? '#00ff87'
+                    : trustScore.tier === 'Investigative Reporter' ? '#ff7a4d'
+                    : trustScore.tier === 'Muckraker' ? '#ffcf5c'
+                    : trustScore.tier === 'Whistleblower' ? '#4dd4ff'
+                    : '#8b8b8b')
+                  : '#666'
+                const glow = trustScore && trustScore.tier !== 'Source'
+                  ? `0 0 10px ${tierColor}66`
+                  : 'none'
+                return (
+                  <div>
+                    <button
+                      className="side-btn"
+                      onClick={() => setTrustProfileOpen(true)}
+                      aria-label="Open Trust Score profile"
+                      style={{
+                        color: tierColor,
+                        borderColor: trustScore && trustScore.tier !== 'Source'
+                          ? `${tierColor}77`
+                          : undefined,
+                        fontFamily: 'monospace',
+                        fontSize: 15,
+                        fontWeight: 700,
+                        textShadow: glow,
+                      }}
+                    >
+                      {trustScore?.emoji ?? '·'}
+                    </button>
+                    <div
+                      className="side-btn-label"
+                      style={{
+                        color: tierColor,
+                        fontSize: 9,
+                        letterSpacing: 0.3,
+                      }}
+                    >
+                      {trustScore
+                        ? `${Math.round(trustScore.score)}`
+                        : '—'}
+                    </div>
                   </div>
-                </div>
-              )}
+                )
+              })()}
               {/* CRT / broadcast-noise toggle. Off by default (evidence
                   first); flipping it on adds scanlines + grain +
                   vignette to captures for a retro TV aesthetic. Choice
@@ -4972,30 +5026,48 @@ export default function Home() {
                 }}>
                   TRUST SCORE
                 </div>
-                <div style={{
-                  fontFamily: 'monospace',
-                  fontSize: 56,
-                  fontWeight: 700,
-                  lineHeight: 1,
-                  color: trustScore?.tier === 'Platinum' ? '#e5e4e2'
-                    : trustScore?.tier === 'Gold' ? '#ffd700'
-                    : trustScore?.tier === 'Silver' ? '#c0c0c0'
-                    : '#cd7f32',
-                  textShadow: trustScore && trustScore.tier !== 'Bronze'
-                    ? '0 0 20px rgba(255,215,0,0.35)'
-                    : undefined,
-                }}>
-                  {trustScore ? Math.round(trustScore.score) : '—'}
-                </div>
-                <div style={{
-                  fontSize: 14,
-                  fontWeight: 700,
-                  letterSpacing: 2,
-                  marginTop: 8,
-                  color: '#fff',
-                }}>
-                  {trustScore?.tier ?? 'BRONZE'} TIER
-                </div>
+                {(() => {
+                  const tierColor = trustScore
+                    ? (trustScore.tier === 'Truth-Teller' ? '#00ff87'
+                      : trustScore.tier === 'Investigative Reporter' ? '#ff7a4d'
+                      : trustScore.tier === 'Muckraker' ? '#ffcf5c'
+                      : trustScore.tier === 'Whistleblower' ? '#4dd4ff'
+                      : '#8b8b8b')
+                    : '#8b8b8b'
+                  return (
+                    <>
+                      <div style={{
+                        fontSize: 64,
+                        lineHeight: 1,
+                        marginBottom: 8,
+                      }}>
+                        {trustScore?.emoji ?? '🕯'}
+                      </div>
+                      <div style={{
+                        fontFamily: 'monospace',
+                        fontSize: 56,
+                        fontWeight: 700,
+                        lineHeight: 1,
+                        color: tierColor,
+                        textShadow: trustScore && trustScore.tier !== 'Source'
+                          ? `0 0 20px ${tierColor}66`
+                          : undefined,
+                      }}>
+                        {trustScore ? Math.round(trustScore.score) : '—'}
+                      </div>
+                      <div style={{
+                        fontSize: 14,
+                        fontWeight: 700,
+                        letterSpacing: 2,
+                        marginTop: 10,
+                        color: tierColor,
+                        textTransform: 'uppercase',
+                      }}>
+                        {trustScore?.tier ?? 'Source'}
+                      </div>
+                    </>
+                  )
+                })()}
                 {shortTonAddr && (
                   <div style={{ fontFamily: 'monospace', fontSize: 11, color: '#666', marginTop: 6 }}>
                     {shortTonAddr}
@@ -5043,8 +5115,36 @@ export default function Home() {
                 }}>
                   Score = posts × 2 + reactions × 8 + shares × 10, with time decay.
                   Older activity loses weight; recent engagement drives your tier.
-                  <div style={{ marginTop: 8, color: '#666' }}>
-                    Tiers · Bronze (0-49) · Silver (50-199) · Gold (200-999) · Platinum (1000+)
+                  <div style={{ marginTop: 10, display: 'grid', gap: 4 }}>
+                    {[
+                      { emoji: '🕯', name: 'Source',                 range: '0–49',       col: '#8b8b8b' },
+                      { emoji: '📢', name: 'Whistleblower',          range: '50–199',     col: '#4dd4ff' },
+                      { emoji: '🔦', name: 'Muckraker',              range: '200–999',    col: '#ffcf5c' },
+                      { emoji: '🔍', name: 'Investigative Reporter', range: '1000–4999',  col: '#ff7a4d' },
+                      { emoji: '⚖️', name: 'Truth-Teller',           range: '5000+',      col: '#00ff87' },
+                    ].map((t) => {
+                      const isCurrent = trustScore?.tier === t.name
+                      return (
+                        <div
+                          key={t.name}
+                          style={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: 8,
+                            padding: '4px 6px',
+                            borderRadius: 6,
+                            background: isCurrent ? `${t.col}20` : 'transparent',
+                            border: isCurrent ? `1px solid ${t.col}55` : '1px solid transparent',
+                          }}
+                        >
+                          <span style={{ fontSize: 14 }}>{t.emoji}</span>
+                          <span style={{ color: isCurrent ? t.col : '#666', fontWeight: isCurrent ? 700 : 400, flex: 1 }}>
+                            {t.name}
+                          </span>
+                          <span style={{ color: '#555', fontFamily: 'monospace' }}>{t.range}</span>
+                        </div>
+                      )
+                    })}
                   </div>
                 </div>
               </div>
