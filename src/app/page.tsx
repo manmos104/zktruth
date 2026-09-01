@@ -10,6 +10,7 @@ import { useTelegramExpand } from './hooks/useTelegramExpand';
 import { useTonConnectUI, useTonWallet } from '@tonconnect/ui-react';
 import { upload } from '@vercel/blob/client';
 import { Address } from '@ton/core';
+import { TrustBadge, type TrustTier as TrustTierType } from './TrustBadge';
 import {
   buildMintTransaction,
   hashHexToBigInt,
@@ -4295,6 +4296,7 @@ export default function Home() {
                   → gold (Muckraker) → orange (Investigator) → green
                   (Truth-Teller) so higher tiers stand out at a glance. */}
               {tonWallet && (() => {
+                const tier: TrustTierType = (trustScore?.tier as TrustTierType) ?? 'Source'
                 const tierColor = trustScore
                   ? (trustScore.tier === 'Truth-Teller' ? '#00ff87'
                     : trustScore.tier === 'Investigative Reporter' ? '#ff7a4d'
@@ -4302,9 +4304,6 @@ export default function Home() {
                     : trustScore.tier === 'Whistleblower' ? '#4dd4ff'
                     : '#8b8b8b')
                   : '#666'
-                const glow = trustScore && trustScore.tier !== 'Source'
-                  ? `0 0 10px ${tierColor}66`
-                  : 'none'
                 return (
                   <div>
                     <button
@@ -4316,25 +4315,26 @@ export default function Home() {
                         borderColor: trustScore && trustScore.tier !== 'Source'
                           ? `${tierColor}77`
                           : undefined,
-                        fontFamily: 'monospace',
-                        fontSize: 15,
-                        fontWeight: 700,
-                        textShadow: glow,
+                        padding: 0,
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        overflow: 'hidden',
                       }}
                     >
-                      {trustScore?.emoji ?? '·'}
+                      <TrustBadge tier={tier} size={40} />
                     </button>
                     <div
                       className="side-btn-label"
                       style={{
                         color: tierColor,
-                        fontSize: 9,
-                        letterSpacing: 0.3,
+                        fontFamily: 'monospace',
+                        fontWeight: 700,
+                        fontSize: 10,
+                        letterSpacing: 0.4,
                       }}
                     >
-                      {trustScore
-                        ? `${Math.round(trustScore.score)}`
-                        : '—'}
+                      {trustScore ? Math.round(trustScore.score) : '—'}
                     </div>
                   </div>
                 )
@@ -5027,6 +5027,7 @@ export default function Home() {
                   TRUST SCORE
                 </div>
                 {(() => {
+                  const tier: TrustTierType = (trustScore?.tier as TrustTierType) ?? 'Source'
                   const tierColor = trustScore
                     ? (trustScore.tier === 'Truth-Teller' ? '#00ff87'
                       : trustScore.tier === 'Investigative Reporter' ? '#ff7a4d'
@@ -5037,11 +5038,14 @@ export default function Home() {
                   return (
                     <>
                       <div style={{
-                        fontSize: 64,
-                        lineHeight: 1,
-                        marginBottom: 8,
+                        display: 'flex',
+                        justifyContent: 'center',
+                        marginBottom: 12,
+                        filter: trustScore && trustScore.tier !== 'Source'
+                          ? `drop-shadow(0 0 12px ${tierColor}66)`
+                          : undefined,
                       }}>
-                        {trustScore?.emoji ?? '🕯'}
+                        <TrustBadge tier={tier} size={120} />
                       </div>
                       <div style={{
                         fontFamily: 'monospace',
@@ -5115,31 +5119,35 @@ export default function Home() {
                 }}>
                   Score = posts × 2 + reactions × 8 + shares × 10, with time decay.
                   Older activity loses weight; recent engagement drives your tier.
-                  <div style={{ marginTop: 10, display: 'grid', gap: 4 }}>
-                    {[
-                      { emoji: '🕯', name: 'Source',                 range: '0–49',       col: '#8b8b8b' },
-                      { emoji: '📢', name: 'Whistleblower',          range: '50–199',     col: '#4dd4ff' },
-                      { emoji: '🔦', name: 'Muckraker',              range: '200–999',    col: '#ffcf5c' },
-                      { emoji: '🔍', name: 'Investigative Reporter', range: '1000–4999',  col: '#ff7a4d' },
-                      { emoji: '⚖️', name: 'Truth-Teller',           range: '5000+',      col: '#00ff87' },
-                    ].map((t) => {
-                      const isCurrent = trustScore?.tier === t.name
+                  <div style={{ marginTop: 10, display: 'grid', gap: 6 }}>
+                    {([
+                      { tier: 'Source' as const,                 range: '0–49',       col: '#8b8b8b' },
+                      { tier: 'Whistleblower' as const,          range: '50–199',     col: '#4dd4ff' },
+                      { tier: 'Muckraker' as const,              range: '200–999',    col: '#ffcf5c' },
+                      { tier: 'Investigative Reporter' as const, range: '1000–4999',  col: '#ff7a4d' },
+                      { tier: 'Truth-Teller' as const,           range: '5000+',      col: '#00ff87' },
+                    ]).map((t) => {
+                      const isCurrent = trustScore?.tier === t.tier
                       return (
                         <div
-                          key={t.name}
+                          key={t.tier}
                           style={{
                             display: 'flex',
                             alignItems: 'center',
-                            gap: 8,
-                            padding: '4px 6px',
-                            borderRadius: 6,
+                            gap: 10,
+                            padding: '6px 8px',
+                            borderRadius: 8,
                             background: isCurrent ? `${t.col}20` : 'transparent',
-                            border: isCurrent ? `1px solid ${t.col}55` : '1px solid transparent',
+                            border: isCurrent ? `1px solid ${t.col}66` : '1px solid rgba(255,255,255,0.05)',
                           }}
                         >
-                          <span style={{ fontSize: 14 }}>{t.emoji}</span>
-                          <span style={{ color: isCurrent ? t.col : '#666', fontWeight: isCurrent ? 700 : 400, flex: 1 }}>
-                            {t.name}
+                          <TrustBadge
+                            tier={t.tier}
+                            size={26}
+                            style={isCurrent ? undefined : { opacity: 0.55 }}
+                          />
+                          <span style={{ color: isCurrent ? t.col : '#666', fontWeight: isCurrent ? 700 : 500, flex: 1 }}>
+                            {t.tier}
                           </span>
                           <span style={{ color: '#555', fontFamily: 'monospace' }}>{t.range}</span>
                         </div>
