@@ -43,7 +43,7 @@ function normaliseWallet(input: string): string {
 }
 
 export async function POST(request: Request) {
-  let body: { wallet?: string; messageId?: number }
+  let body: { wallet?: string; messageId?: number; contentHashHex?: string }
   try {
     body = await request.json()
   } catch {
