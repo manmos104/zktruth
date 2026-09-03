@@ -142,8 +142,20 @@ export interface SignedC2paClaim {
 let cachedKey: { privatePem: string; publicPem: string } | null = null
 function getSigningKey(): { privatePem: string; publicPem: string } {
   if (cachedKey) return cachedKey
+  // Prefer base64-encoded env vars (single-line, no PEM-newline
+  // headache when pasting into hosted-secret UIs like Vercel), fall
+  // back to raw PEM if the operator opted for that instead.
+  const privB64 = process.env.ATTEST_SIGNING_KEY_B64
+  const pubB64 = process.env.ATTEST_PUBLIC_KEY_B64
   const provided = process.env.ATTEST_SIGNING_KEY
   const publicProvided = process.env.ATTEST_PUBLIC_KEY
+  if (privB64 && pubB64) {
+    cachedKey = {
+      privatePem: Buffer.from(privB64, 'base64').toString('utf8'),
+      publicPem: Buffer.from(pubB64, 'base64').toString('utf8'),
+    }
+    return cachedKey
+  }
   if (provided && publicProvided) {
     cachedKey = { privatePem: provided, publicPem: publicProvided }
     return cachedKey
