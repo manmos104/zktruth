@@ -1,4 +1,10 @@
-import { createHash, createHmac, createSign, generateKeyPairSync } from 'node:crypto'
+import {
+  createHash,
+  createHmac,
+  createPrivateKey,
+  generateKeyPairSync,
+  sign as edSign,
+} from 'node:crypto'
 
 /**
  * Attestation library — the "raise the bar" defense layer that
@@ -172,15 +178,10 @@ export function signC2paClaim(input: C2paClaimInput): SignedC2paClaim {
   const canonical = canonicalise(fields as unknown as Record<string, unknown>)
   const digest = createHash('sha256').update(canonical).digest('hex')
   const { privatePem, publicPem } = getSigningKey()
-  // Ed25519 signs the raw bytes directly (no hash-then-sign), so we
-  // feed it the canonical JSON, not the pre-computed digest.
-  const signer = createSign('sha512') // unused for ed25519 but required by the API surface
-  void signer
-  // For Ed25519 use crypto.sign directly.
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
-  const { sign, createPrivateKey } = require('node:crypto') as typeof import('node:crypto')
+  // Ed25519 signs the raw bytes directly (no hash-then-sign) — pass
+  // `null` as the algorithm and the canonical JSON as the payload.
   const key = createPrivateKey(privatePem)
-  const signature = sign(null, Buffer.from(canonical), key)
+  const signature = edSign(null, Buffer.from(canonical), key)
   return {
     version: '1',
     digestHex: digest,
