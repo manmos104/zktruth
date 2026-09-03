@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
 import { head } from '@vercel/blob'
+import { getRedis } from '@/lib/trustStore'
 
 /**
  * Dynamic TEP-64 offchain metadata for a zkTruth Proof NFT.
@@ -79,6 +80,34 @@ export async function GET(
     ? await resolveMedia(hash)
     : { image: FALLBACK_IMAGE }
 
+  // Attestation lookup — surface Telegram + anomaly + signed C2PA
+  // claim state in the NFT attributes so wallets / marketplaces (and
+  // Grant reviewers) can see the extra evidence at a glance.
+  let attestations: {
+    telegramVerified?: boolean
+    anomalySeverity?: number
+    claimDigest?: string
+    claimSignatureB64?: string
+  } | null = null
+  if (hash) {
+    try {
+      const r = getRedis()
+      const rec = await r.get<{
+        claim?: { digestHex?: string; signatureB64?: string }
+        anomaly?: { severity?: number }
+        telegramVerified?: boolean
+      }>(`claim:${hash}`)
+      if (rec) {
+        attestations = {
+          telegramVerified: !!rec.telegramVerified,
+          anomalySeverity: rec.anomaly?.severity,
+          claimDigest: rec.claim?.digestHex,
+          claimSignatureB64: rec.claim?.signatureB64,
+        }
+      }
+    } catch { /* cold KV — skip attestation attrs */ }
+  }
+
   const body: Record<string, unknown> = {
     name: hash
       ? `zkTruth Proof #${shortHash(hash)}`
@@ -94,6 +123,20 @@ export async function GET(
       { trait_type: 'Chain', value: 'TON' },
       { trait_type: 'Standard', value: 'TEP-62' },
       ...(hash ? [{ trait_type: 'Content Hash', value: hash }] : []),
+      ...(attestations
+        ? [
+            { trait_type: 'Telegram Verified', value: attestations.telegramVerified ? 'Yes' : 'No' },
+            {
+              trait_type: 'Anomaly Severity',
+              value: typeof attestations.anomalySeverity === 'number'
+                ? attestations.anomalySeverity
+                : 'Unknown',
+            },
+            ...(attestations.claimDigest
+              ? [{ trait_type: 'C2PA Claim Digest', value: attestations.claimDigest }]
+              : []),
+          ]
+        : []),
     ],
   }
   if (media.animation_url) body.animation_url = media.animation_url

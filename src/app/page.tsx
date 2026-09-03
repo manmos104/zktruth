@@ -3560,6 +3560,43 @@ export default function Home() {
       captureTimestamp: timestampToBigInt(proofData?.timestamp),
       telegramMessageId: messageIdFromPostUrl(lastTelegramPostUrl ?? undefined),
     })
+
+    // ---- Attestation stage (Phase 8) --------------------------------
+    // Ask the server to (a) verify our Telegram initData, (b) sign a
+    // C2PA-style provenance claim over the capture inputs, and (c)
+    // run the anomaly heuristics. The response is persisted server-
+    // side under `claim:<hash>` so the NFT metadata endpoint can
+    // stamp the attestation state into the on-chain-linked JSON.
+    // Fire-and-forget — a failure here degrades the trust attributes
+    // but must not block the mint the user just paid gas for.
+    try {
+      setShareStatus('ATTESTING CAPTURE...')
+      const tgInit = (window as unknown as {
+        Telegram?: { WebApp?: { initData?: string } }
+      }).Telegram?.WebApp?.initData
+      // Split "lat,lng" GPS string into a tuple if we have one — the
+      // server needs numbers for the IP-vs-GPS distance check.
+      let gpsLatLon: [number, number] | undefined
+      if (gpsCoords && !gpsCoords.startsWith('Acquiring') && gpsCoords !== 'GPS OFF') {
+        const parts = gpsCoords.split(',').map((s) => Number(s.trim()))
+        if (parts.length === 2 && parts.every((n) => Number.isFinite(n))) {
+          gpsLatLon = [parts[0], parts[1]]
+        }
+      }
+      void fetch('/api/attest/claim', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          contentHashHex,
+          gpsHashHex: gpsHexRaw || undefined,
+          gpsLatLon,
+          captureTimestampIso: proofData?.timestamp,
+          wallet: tonWallet.account.address,
+          initData: tgInit,
+        }),
+      }).catch(() => { /* attestation is best-effort */ })
+    } catch { /* best-effort */ }
+
     setShareStatus('SIGN THE MINT IN YOUR WALLET...')
     try {
       await tonConnectUI.sendTransaction(tx)
@@ -3589,6 +3626,7 @@ export default function Home() {
             body: JSON.stringify({
               wallet: tonWallet.account.address,
               messageId: Number.isFinite(trustMsgId) && trustMsgId > 0 ? trustMsgId : 0,
+              contentHashHex,
             }),
           })
             .then(() => setTrustRefreshCount((n) => n + 1))

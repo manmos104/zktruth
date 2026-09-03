@@ -2,8 +2,11 @@ import { NextResponse } from 'next/server'
 import { Address } from '@ton/core'
 import {
   appendPost,
+  appendShare,
+  getRedis,
   saveMessageRecord,
   type MessageRecord,
+  type ShareEvent,
 } from '@/lib/trustStore'
 
 /**
@@ -48,6 +51,8 @@ export async function POST(request: Request) {
   }
   const rawWallet = body?.wallet
   const messageIdRaw = body?.messageId
+  const contentHashHex: string | undefined =
+    typeof body?.contentHashHex === 'string' ? body.contentHashHex.toLowerCase() : undefined
   if (!rawWallet || typeof rawWallet !== 'string') {
     return NextResponse.json({ error: 'wallet is required' }, { status: 400 })
   }
@@ -76,7 +81,51 @@ export async function POST(request: Request) {
     // Credit the wallet with a post event either way.
     await appendPost(wallet, { messageId, timestamp: now })
 
-    return NextResponse.json({ ok: true, wallet, messageId })
+    // Attestation bonus / penalty — read the claim record produced by
+    // /api/attest/claim (indexed by content hash) and adjust the
+    // wallet's Trust Score accordingly:
+    //   - +3 bonus shares if Telegram-verified + low anomaly
+    //   - -2 penalty shares if high anomaly (heuristic spoof signal)
+    // We record this as a `ShareEvent` so the same decay + weight math
+    // applies without introducing a new event type.
+    let attestBonus = 0
+    let attestReason: string | undefined
+    if (contentHashHex) {
+      try {
+        const r = getRedis()
+        const rec = await r.get<{
+          telegramVerified?: boolean
+          anomaly?: { severity?: number }
+        }>(`claim:${contentHashHex}`)
+        if (rec) {
+          const sev = rec.anomaly?.severity ?? 0
+          if (rec.telegramVerified && sev < 20) {
+            attestBonus = 3
+            attestReason = 'attested_low_anomaly'
+          } else if (sev >= 60) {
+            attestBonus = -2
+            attestReason = `high_anomaly_${sev}`
+          }
+          if (attestBonus !== 0) {
+            const ev: ShareEvent = {
+              messageId,
+              source: 'repost',
+              weight: attestBonus,
+              timestamp: now,
+            }
+            await appendShare(wallet, ev)
+          }
+        }
+      } catch { /* attestation bonus is best-effort */ }
+    }
+
+    return NextResponse.json({
+      ok: true,
+      wallet,
+      messageId,
+      attestBonus,
+      attestReason: attestReason ?? null,
+    })
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err)
     return NextResponse.json({ error: msg }, { status: 500 })
