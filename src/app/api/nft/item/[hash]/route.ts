@@ -52,18 +52,21 @@ async function resolveMedia(hash: string): Promise<ResolvedMedia> {
   const token = process.env.BLOB_READ_WRITE_TOKEN
   if (!token) return { image: FALLBACK_IMAGE }
 
-  // Try image formats first — most captures are photos.
-  for (const ext of ['jpg', 'png']) {
-    const url = await tryHead(`captures/${hash}.${ext}`, token)
-    if (url) return { image: url }
-  }
-  // Then try video formats — set animation_url and keep image as
-  // fallback so wallets without video support still render.
-  for (const ext of ['mp4', 'webm']) {
-    const url = await tryHead(`captures/${hash}.${ext}`, token)
-    if (url) return { image: FALLBACK_IMAGE, animation_url: url }
-  }
-  return { image: FALLBACK_IMAGE }
+  // Poster (jpg/png) → wallet tile thumbnail. Video (mp4/webm) →
+  // animation_url so wallets that support it (Tonkeeper, Getgems)
+  // play the clip inline. We probe BOTH so a video mint gets both
+  // a first-frame poster tile AND the playable video — previous
+  // versions early-returned on the poster and dropped animation_url,
+  // which made video NFTs display as a still image + no playback.
+  const [jpgUrl, pngUrl, mp4Url, webmUrl] = await Promise.all([
+    tryHead(`captures/${hash}.jpg`, token),
+    tryHead(`captures/${hash}.png`, token),
+    tryHead(`captures/${hash}.mp4`, token),
+    tryHead(`captures/${hash}.webm`, token),
+  ])
+  const image = jpgUrl || pngUrl || FALLBACK_IMAGE
+  const video = mp4Url || webmUrl
+  return video ? { image, animation_url: video } : { image }
 }
 
 export async function GET(
