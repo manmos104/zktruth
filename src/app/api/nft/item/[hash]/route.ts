@@ -118,6 +118,18 @@ export async function GET(
     description:
       'On-chain, tamper-evident proof of a real-world capture. The SHA-256 hash of the captured media is anchored on TON and linked to the original Telegram channel post.',
     image: media.image,
+    // Alternate media fields for wallets that don't parse animation_url
+    // yet. Getgems / newer Tonkeeper look at `content_url` and `media`,
+    // Ecosystem NFT viewers (tonviewer, tonapi) prefer `preview` for
+    // stills and check every listed field for playable media. Emit all
+    // of them so we degrade gracefully across the fragmented tooling.
+    ...(media.animation_url
+      ? {
+          content_url: media.animation_url,
+          media: media.animation_url,
+          preview: media.image,
+        }
+      : {}),
     external_url: hash
       ? `https://zktruth.vercel.app/proof/${hash}`
       : 'https://zktruth.vercel.app',
@@ -149,6 +161,23 @@ export async function GET(
       // Wallets cache metadata aggressively. Keep it warm for CDN but
       // short at the edge so we can iterate without waiting hours.
       'Cache-Control': 'public, max-age=60, s-maxage=300',
+      // CORS wide open — TON wallet indexers fetch metadata from
+      // untrusted origins and skip anything without permissive CORS.
+      'Access-Control-Allow-Origin': '*',
+      'Access-Control-Allow-Methods': 'GET, OPTIONS',
+    },
+  })
+}
+
+// Preflight support so browser-based indexers (like Getgems) don't
+// choke on OPTIONS probes when checking cross-origin availability.
+export async function OPTIONS() {
+  return new Response(null, {
+    status: 204,
+    headers: {
+      'Access-Control-Allow-Origin': '*',
+      'Access-Control-Allow-Methods': 'GET, OPTIONS',
+      'Access-Control-Allow-Headers': '*',
     },
   })
 }
