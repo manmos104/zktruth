@@ -3899,7 +3899,7 @@ export default function Home() {
         body: f,
       })
       const txt = await r.text()
-      let d: { ok?: boolean; description?: string; result?: { message_id: number; document?: unknown; video?: unknown } } = {}
+      let d: { ok?: boolean; description?: string; result?: { message_id: number; document?: unknown; video?: unknown; photo?: unknown } } = {}
       try { d = JSON.parse(txt) } catch { /* keep raw */ }
       return { r, d, txt }
     }
@@ -3908,13 +3908,21 @@ export default function Home() {
       let { r: res, d: data, txt: rawText } = await uploadTo(tgMethod, tgFileField)
       let usedMethod = tgMethod
 
-      // Fallback: if sendDocument succeeded (200/ok) but Telegram
-      // silently dropped the file (no document field in the result),
-      // retry with sendVideo. Some Telegram server versions accept
-      // sendDocument for webm but strip the attachment; sendVideo
-      // handles it correctly in that case.
+      // Fallback: sendDocument occasionally 200-OKs while dropping the
+      // attached webm silently. In that case we retry via sendVideo,
+      // which handles those clips correctly.
+      //
+      // NOTE: gate this ONLY on the sendDocument path — sendPhoto
+      // succeeds with `result.photo` (not `document`/`video`), so the
+      // old broad check retried photos as videos and produced the
+      // "one normal + one squashed" duplicate the channel was showing.
       const documentMissing =
-        res.ok && data.ok && data.result && !data.result.document && !data.result.video
+        tgMethod === 'sendDocument' &&
+        res.ok &&
+        data.ok &&
+        data.result &&
+        !data.result.document &&
+        !data.result.video
       if (documentMissing) {
         const retry = await uploadTo('sendVideo', 'video')
         res = retry.r
