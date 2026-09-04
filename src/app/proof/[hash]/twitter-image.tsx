@@ -68,7 +68,7 @@ export default function TwitterImage({
             }}
           >
             <div style={{ width: 8, height: 8, borderRadius: 8, background: '#00c864' }} />
-            VERIFIED · WORLD CHAIN
+            VERIFIED · TON CHAIN
           </div>
         </div>
 
