@@ -5127,22 +5127,22 @@ export default function Home() {
               }}
             >
               <button
-                onClick={() => setLeaderboardOpen(false)}
+                onClick={(e) => { e.stopPropagation(); setLeaderboardOpen(false); }}
                 aria-label="Close"
                 style={{
-                  position: 'absolute',
+                  position: 'fixed',
                   top: 14,
                   right: 14,
-                  width: 40,
-                  height: 40,
-                  borderRadius: 20,
+                  width: 44,
+                  height: 44,
+                  borderRadius: 22,
                   border: 'none',
-                  background: 'rgba(255,255,255,0.08)',
+                  background: 'rgba(255,255,255,0.12)',
                   color: '#fff',
-                  fontSize: 20,
+                  fontSize: 22,
                   fontWeight: 700,
                   cursor: 'pointer',
-                  zIndex: 10,
+                  zIndex: 1010,
                 }}
               >✕</button>
               <div style={{ padding: '28px 24px 16px', textAlign: 'center', flexShrink: 0 }}>
@@ -5297,25 +5297,48 @@ export default function Home() {
           <div
             className="privacy-modal-backdrop"
             onClick={() => setTrustProfileOpen(false)}
+            style={{ padding: 0 }}
           >
             <div
-              className="privacy-modal"
               onClick={(e) => e.stopPropagation()}
-              style={{ maxWidth: 360 }}
+              style={{
+                position: 'fixed',
+                inset: 0,
+                background: '#0a0a0a',
+                display: 'flex',
+                flexDirection: 'column',
+                zIndex: 1000,
+                overflowY: 'auto',
+                WebkitOverflowScrolling: 'touch',
+              }}
             >
               <button
-                className="privacy-modal-close"
-                onClick={() => setTrustProfileOpen(false)}
+                onClick={(e) => { e.stopPropagation(); setTrustProfileOpen(false); }}
                 aria-label="Close"
+                style={{
+                  position: 'fixed',
+                  top: 14,
+                  right: 14,
+                  width: 44,
+                  height: 44,
+                  borderRadius: 22,
+                  border: 'none',
+                  background: 'rgba(255,255,255,0.12)',
+                  color: '#fff',
+                  fontSize: 22,
+                  fontWeight: 700,
+                  cursor: 'pointer',
+                  zIndex: 1010,
+                }}
               >✕</button>
-              <div style={{ padding: '20px 24px 8px', textAlign: 'center' }}>
+              <div style={{ padding: '48px 24px 12px', textAlign: 'center', flexShrink: 0 }}>
                 <div style={{
                   fontFamily: 'monospace',
-                  fontSize: 14,
-                  fontWeight: 700,
-                  letterSpacing: 2,
-                  color: '#e0e0e0',
-                  marginBottom: 10,
+                  fontSize: 16,
+                  fontWeight: 800,
+                  letterSpacing: 3,
+                  color: '#ffffff',
+                  marginBottom: 12,
                 }}>
                   TRUST SCORE
                 </div>
@@ -5333,30 +5356,30 @@ export default function Home() {
                       <div style={{
                         display: 'flex',
                         justifyContent: 'center',
-                        marginBottom: 12,
+                        marginBottom: 16,
                         filter: trustScore && trustScore.tier !== 'Source'
-                          ? `drop-shadow(0 0 12px ${tierColor}66)`
+                          ? `drop-shadow(0 0 16px ${tierColor}88)`
                           : undefined,
                       }}>
-                        <TrustBadge tier={tier} size={120} />
+                        <TrustBadge tier={tier} size={140} />
                       </div>
                       <div style={{
                         fontFamily: 'monospace',
-                        fontSize: 56,
-                        fontWeight: 700,
+                        fontSize: 72,
+                        fontWeight: 800,
                         lineHeight: 1,
                         color: tierColor,
                         textShadow: trustScore && trustScore.tier !== 'Source'
-                          ? `0 0 20px ${tierColor}66`
+                          ? `0 0 24px ${tierColor}88`
                           : undefined,
                       }}>
                         {trustScore ? Math.round(trustScore.score) : '—'}
                       </div>
                       <div style={{
-                        fontSize: 14,
-                        fontWeight: 700,
-                        letterSpacing: 2,
-                        marginTop: 10,
+                        fontSize: 18,
+                        fontWeight: 800,
+                        letterSpacing: 3,
+                        marginTop: 14,
                         color: tierColor,
                         textTransform: 'uppercase',
                       }}>
@@ -5366,17 +5389,17 @@ export default function Home() {
                   )
                 })()}
                 {shortTonAddr && (
-                  <div style={{ fontFamily: 'monospace', fontSize: 13, color: '#bbb', marginTop: 8, fontWeight: 600 }}>
+                  <div style={{ fontFamily: 'monospace', fontSize: 15, color: '#ffffff', marginTop: 12, fontWeight: 700 }}>
                     {shortTonAddr}
                   </div>
                 )}
               </div>
-              <div style={{ padding: '16px 24px 20px' }}>
+              <div style={{ padding: '20px 24px 24px', flexShrink: 0 }}>
                 <div style={{
                   display: 'grid',
                   gridTemplateColumns: 'repeat(3, 1fr)',
-                  gap: 8,
-                  marginBottom: 14,
+                  gap: 10,
+                  marginBottom: 18,
                 }}>
                   {[
                     { label: 'POSTS',     value: trustScore?.posts ?? 0,          weight: 1 },
@@ -5384,32 +5407,32 @@ export default function Home() {
                     { label: 'SHARES',    value: trustScore?.sharesTotal ?? 0,    weight: 15 },
                   ].map((it) => (
                     <div key={it.label} style={{
-                      background: 'rgba(255,255,255,0.06)',
-                      border: '1px solid rgba(255,255,255,0.14)',
-                      borderRadius: 10,
-                      padding: '12px 6px',
+                      background: 'rgba(255,255,255,0.09)',
+                      border: '1px solid rgba(255,255,255,0.2)',
+                      borderRadius: 12,
+                      padding: '16px 6px',
                       textAlign: 'center',
                     }}>
-                      <div style={{ fontFamily: 'monospace', fontSize: 28, fontWeight: 800, color: '#00ff87' }}>
+                      <div style={{ fontFamily: 'monospace', fontSize: 36, fontWeight: 800, color: '#00ff87', textShadow: '0 0 8px rgba(0,255,135,0.3)' }}>
                         {it.value}
                       </div>
-                      <div style={{ fontSize: 12, letterSpacing: 1.2, color: '#ddd', marginTop: 6, fontWeight: 700 }}>
+                      <div style={{ fontSize: 13, letterSpacing: 1.5, color: '#ffffff', marginTop: 8, fontWeight: 800 }}>
                         {it.label}
                       </div>
-                      <div style={{ fontSize: 11, color: '#999', marginTop: 3, fontFamily: 'monospace', fontWeight: 600 }}>
+                      <div style={{ fontSize: 13, color: '#cccccc', marginTop: 4, fontFamily: 'monospace', fontWeight: 700 }}>
                         ×{it.weight}
                       </div>
                     </div>
                   ))}
                 </div>
                 <div style={{
-                  fontSize: 13,
-                  lineHeight: 1.55,
-                  color: '#ddd',
-                  padding: '12px 14px',
-                  background: 'rgba(255,255,255,0.05)',
-                  borderRadius: 8,
-                  fontWeight: 500,
+                  fontSize: 14,
+                  lineHeight: 1.6,
+                  color: '#ffffff',
+                  padding: '14px 16px',
+                  background: 'rgba(255,255,255,0.08)',
+                  borderRadius: 10,
+                  fontWeight: 600,
                 }}>
                   Score = posts × 1 + reactions × 5 + shares × 15, with time decay.
                   Older activity loses weight; recent engagement drives your tier.
@@ -5428,31 +5451,31 @@ export default function Home() {
                           style={{
                             display: 'flex',
                             alignItems: 'center',
-                            gap: 10,
-                            padding: '6px 8px',
-                            borderRadius: 8,
-                            background: isCurrent ? `${t.col}20` : 'transparent',
-                            border: isCurrent ? `1px solid ${t.col}66` : '1px solid rgba(255,255,255,0.05)',
+                            gap: 12,
+                            padding: '10px 12px',
+                            borderRadius: 10,
+                            background: isCurrent ? `${t.col}30` : 'rgba(255,255,255,0.05)',
+                            border: isCurrent ? `1.5px solid ${t.col}` : '1px solid rgba(255,255,255,0.12)',
                           }}
                         >
                           <TrustBadge
                             tier={t.tier}
-                            size={32}
-                            style={isCurrent ? undefined : { opacity: 0.7 }}
+                            size={40}
+                            style={isCurrent ? undefined : { opacity: 0.85 }}
                           />
                           <span style={{
-                            color: isCurrent ? t.col : '#ccc',
-                            fontWeight: isCurrent ? 800 : 600,
-                            fontSize: 14,
+                            color: isCurrent ? t.col : '#ffffff',
+                            fontWeight: isCurrent ? 800 : 700,
+                            fontSize: 15,
                             flex: 1,
                           }}>
                             {t.tier}
                           </span>
                           <span style={{
-                            color: '#aaa',
+                            color: isCurrent ? t.col : '#dddddd',
                             fontFamily: 'monospace',
-                            fontSize: 13,
-                            fontWeight: 600,
+                            fontSize: 14,
+                            fontWeight: 700,
                           }}>{t.range}</span>
                         </div>
                       )
