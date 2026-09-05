@@ -5137,35 +5137,17 @@ export default function Home() {
                 zIndex: 1000,
               }}
             >
-              {/* Big close button at the BOTTOM CENTER — safe area
-                  avoids Telegram's top header, plenty of thumb room,
-                  impossible to miss. Also wired to Telegram's native
-                  BackButton via useTelegramBackButton for good UX. */}
-              <button
-                onClick={(e) => { e.stopPropagation(); setLeaderboardOpen(false); }}
-                aria-label="Close"
-                style={{
-                  position: 'fixed',
-                  bottom: 'calc(env(safe-area-inset-bottom, 0px) + 20px)',
-                  left: '50%',
-                  transform: 'translateX(-50%)',
-                  minWidth: 200,
-                  height: 56,
-                  padding: '0 32px',
-                  borderRadius: 28,
-                  border: '2px solid rgba(255,255,255,0.3)',
-                  background: 'rgba(255,255,255,0.15)',
-                  backdropFilter: 'blur(12px)',
-                  color: '#fff',
-                  fontSize: 17,
-                  fontWeight: 800,
-                  letterSpacing: 1.5,
-                  cursor: 'pointer',
-                  zIndex: 1010,
-                  boxShadow: '0 4px 20px rgba(0,0,0,0.5)',
-                }}
-              >✕ CLOSE</button>
-              <div style={{ padding: '28px 24px 16px', textAlign: 'center', flexShrink: 0 }}>
+              {/* Close is via Telegram's native BackButton — the ← arrow
+                  in the header, wired through useTelegramBackButton
+                  above. No in-app close button needed. */}
+              <div style={{
+                // Nudge the whole header block down so the "WEEKLY
+                // LEADERBOARD" caption clears Telegram's own header
+                // area and the composition feels less top-heavy.
+                padding: 'calc(env(safe-area-inset-top, 0px) + 60px) 24px 20px',
+                textAlign: 'center',
+                flexShrink: 0,
+              }}>
                 <div style={{
                   fontFamily: 'monospace',
                   fontSize: 14,
@@ -5202,9 +5184,7 @@ export default function Home() {
               </div>
               <div style={{
                 overflowY: 'auto',
-                // Extra bottom padding so the fixed CLOSE button
-                // (~56px + safe-area) doesn't cover the last row.
-                padding: '4px 16px calc(env(safe-area-inset-bottom, 0px) + 100px)',
+                padding: '4px 16px calc(env(safe-area-inset-bottom, 0px) + 20px)',
                 flex: 1,
                 minHeight: 0,
                 WebkitOverflowScrolling: 'touch',
@@ -5334,34 +5314,12 @@ export default function Home() {
                 WebkitOverflowScrolling: 'touch',
               }}
             >
-              {/* Bottom-center close — same rationale as leaderboard's:
-                  avoids Telegram's top header overlap, big touch target,
-                  visible against any background. */}
-              <button
-                onClick={(e) => { e.stopPropagation(); setTrustProfileOpen(false); }}
-                aria-label="Close"
-                style={{
-                  position: 'fixed',
-                  bottom: 'calc(env(safe-area-inset-bottom, 0px) + 20px)',
-                  left: '50%',
-                  transform: 'translateX(-50%)',
-                  minWidth: 200,
-                  height: 56,
-                  padding: '0 32px',
-                  borderRadius: 28,
-                  border: '2px solid rgba(255,255,255,0.3)',
-                  background: 'rgba(255,255,255,0.15)',
-                  backdropFilter: 'blur(12px)',
-                  color: '#fff',
-                  fontSize: 17,
-                  fontWeight: 800,
-                  letterSpacing: 1.5,
-                  cursor: 'pointer',
-                  zIndex: 1010,
-                  boxShadow: '0 4px 20px rgba(0,0,0,0.5)',
-                }}
-              >✕ CLOSE</button>
-              <div style={{ padding: '48px 24px 12px', textAlign: 'center', flexShrink: 0 }}>
+              {/* Close is via Telegram's native BackButton (← in header). */}
+              <div style={{
+                padding: 'calc(env(safe-area-inset-top, 0px) + 60px) 24px 16px',
+                textAlign: 'center',
+                flexShrink: 0,
+              }}>
                 <div style={{
                   fontFamily: 'monospace',
                   fontSize: 16,
@@ -5424,7 +5382,7 @@ export default function Home() {
                   </div>
                 )}
               </div>
-              <div style={{ padding: '20px 24px calc(env(safe-area-inset-bottom, 0px) + 100px)', flexShrink: 0 }}>
+              <div style={{ padding: '20px 24px calc(env(safe-area-inset-bottom, 0px) + 24px)', flexShrink: 0 }}>
                 <div style={{
                   display: 'grid',
                   gridTemplateColumns: 'repeat(3, 1fr)',
