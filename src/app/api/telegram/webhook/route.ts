@@ -3,6 +3,7 @@ import {
   appendReaction,
   appendShare,
   getMessageRecord,
+  getRedis,
   type ReactionEvent,
   type ShareEvent,
 } from '@/lib/trustStore'
@@ -82,11 +83,30 @@ export async function POST(request: Request) {
   }
 
   let update: TelegramUpdate
+  let rawBody = ''
   try {
-    update = (await request.json()) as TelegramUpdate
+    rawBody = await request.text()
+    update = JSON.parse(rawBody) as TelegramUpdate
   } catch {
     return NextResponse.json({ ok: true }) // acknowledge to avoid retries
   }
+
+  // Diagnostic counter so we can verify Telegram actually posts events
+  // to us. Bumped on every invocation, plus the LAST payload is kept
+  // so /api/telegram/webhook-stats can dump it for debugging.
+  try {
+    const r = getRedis()
+    await r.incr('webhook:hits:total')
+    const kind = update.message_reaction_count
+      ? 'message_reaction_count'
+      : 'other'
+    await r.incr(`webhook:hits:${kind}`)
+    await r.set('webhook:last', {
+      at: Date.now(),
+      kind,
+      body: rawBody.slice(0, 4000),
+    })
+  } catch { /* diagnostics never block the handler */ }
 
   const evt = update.message_reaction_count
   if (!evt) return NextResponse.json({ ok: true })

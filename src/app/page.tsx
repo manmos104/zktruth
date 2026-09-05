@@ -4007,6 +4007,35 @@ export default function Home() {
       // Remember the post URL so a subsequent MINT ON TON call can
       // stamp its Telegram message id into the on-chain NFT record.
       setLastTelegramPostUrl(postUrl)
+
+      // Trust Score bookkeeping for the FREE hash-post path — mirror
+      // the paid-mint route so reactions and views collected on this
+      // message credit back to the author. Without this the message
+      // has no msg:<id> → wallet mapping in KV and later webhook
+      // events silently 404 as "unknown message". Also gives the
+      // wallet a small `post` credit for the participation itself.
+      try {
+        if (tonWallet?.account.address) {
+          const rawContentHash = proofData?.hash as string | undefined
+          const normalisedHash = rawContentHash
+            ? (rawContentHash.startsWith('0x') || rawContentHash.startsWith('0X')
+                ? rawContentHash.slice(2)
+                : rawContentHash
+              ).toLowerCase()
+            : undefined
+          fetch('/api/trust/mint', {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({
+              wallet: tonWallet.account.address,
+              messageId,
+              contentHashHex: normalisedHash,
+            }),
+          })
+            .then(() => setTrustRefreshCount((n) => n + 1))
+            .catch(() => { /* non-blocking */ })
+        }
+      } catch { /* best-effort */ }
       // Full-screen success burst — swap the "posting..." overlay for
       // a green check that stays for ~1.5s so the outcome reads as a
       // definite "done!" moment.
