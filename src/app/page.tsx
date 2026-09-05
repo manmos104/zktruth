@@ -3379,7 +3379,7 @@ export default function Home() {
     const raw = tonWallet?.account.address
     if (!raw) { setTrustScore(null); return }
     let cancelled = false
-    ;(async () => {
+    const fetchScore = async () => {
       try {
         const r = await fetch(
           `/api/trust/${encodeURIComponent(raw)}?t=${Date.now()}`,
@@ -3398,8 +3398,22 @@ export default function Home() {
           })
         }
       } catch { /* offline / cold KV — leave as null */ }
-    })()
-    return () => { cancelled = true }
+    }
+    // Initial fetch on any dep change.
+    fetchScore()
+    // Poll every 20s while wallet is connected so reactions coming
+    // in via webhook get surfaced without the user having to re-open
+    // the modal. Also refetch immediately when the tab regains focus
+    // (user came back from the Telegram channel where they just
+    // reacted to a post).
+    const interval = setInterval(fetchScore, 20_000)
+    const onVisible = () => { if (document.visibilityState === 'visible') fetchScore() }
+    document.addEventListener('visibilitychange', onVisible)
+    return () => {
+      cancelled = true
+      clearInterval(interval)
+      document.removeEventListener('visibilitychange', onVisible)
+    }
   }, [tonWallet?.account.address, mintComplete, trustProfileOpen, trustRefreshCount]);
 
   // Coordinator callbacks for the real IDKit-backed WorldIdVerifyButton.
