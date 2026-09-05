@@ -5110,38 +5110,63 @@ export default function Home() {
           <div
             className="privacy-modal-backdrop"
             onClick={() => setLeaderboardOpen(false)}
+            style={{ padding: 0 }}
           >
             <div
-              className="privacy-modal"
               onClick={(e) => e.stopPropagation()}
-              style={{ maxWidth: 420, maxHeight: '90vh', display: 'flex', flexDirection: 'column' }}
+              style={{
+                // Full-screen sheet on mobile so the leaderboard uses
+                // every pixel available. Was a 420-wide modal — too
+                // cramped for scanning 100 rows.
+                position: 'fixed',
+                inset: 0,
+                background: '#0a0a0a',
+                display: 'flex',
+                flexDirection: 'column',
+                zIndex: 1000,
+              }}
             >
               <button
-                className="privacy-modal-close"
                 onClick={() => setLeaderboardOpen(false)}
                 aria-label="Close"
+                style={{
+                  position: 'absolute',
+                  top: 14,
+                  right: 14,
+                  width: 40,
+                  height: 40,
+                  borderRadius: 20,
+                  border: 'none',
+                  background: 'rgba(255,255,255,0.08)',
+                  color: '#fff',
+                  fontSize: 20,
+                  fontWeight: 700,
+                  cursor: 'pointer',
+                  zIndex: 10,
+                }}
               >✕</button>
-              <div style={{ padding: '20px 22px 12px', textAlign: 'center', flexShrink: 0 }}>
+              <div style={{ padding: '28px 24px 16px', textAlign: 'center', flexShrink: 0 }}>
                 <div style={{
                   fontFamily: 'monospace',
-                  fontSize: 11,
-                  letterSpacing: 1.4,
-                  color: '#888',
-                  marginBottom: 6,
+                  fontSize: 14,
+                  fontWeight: 700,
+                  letterSpacing: 2,
+                  color: '#e0e0e0',
+                  marginBottom: 10,
                 }}>
                   WEEKLY LEADERBOARD
                 </div>
                 <div style={{
                   fontFamily: 'monospace',
-                  fontSize: 40,
-                  fontWeight: 700,
+                  fontSize: 64,
+                  fontWeight: 800,
                   color: '#ffd700',
                   lineHeight: 1,
-                  textShadow: '0 0 20px rgba(255,215,0,0.4)',
+                  textShadow: '0 0 24px rgba(255,215,0,0.5)',
                 }}>
-                  {leaderboard ? leaderboard.poolTon.toFixed(3) : '—'} <span style={{ fontSize: 20 }}>TON</span>
+                  {leaderboard ? leaderboard.poolTon.toFixed(3) : '—'} <span style={{ fontSize: 28 }}>TON</span>
                 </div>
-                <div style={{ fontSize: 11, color: '#888', marginTop: 6 }}>
+                <div style={{ fontSize: 14, color: '#ccc', marginTop: 10, fontWeight: 500 }}>
                   Prize pool · {leaderboard?.mintCount ?? 0} mints this week
                 </div>
                 {leaderboard?.nextPayoutMs && (() => {
@@ -5149,7 +5174,7 @@ export default function Home() {
                   const days = Math.floor(msLeft / 86_400_000)
                   const hours = Math.floor((msLeft % 86_400_000) / 3_600_000)
                   return (
-                    <div style={{ fontSize: 10, color: '#666', marginTop: 4, fontFamily: 'monospace' }}>
+                    <div style={{ fontSize: 13, color: '#bbb', marginTop: 6, fontFamily: 'monospace', fontWeight: 600 }}>
                       Payout in {days}d {hours}h · Epoch {leaderboard.epochId}
                     </div>
                   )
@@ -5157,12 +5182,13 @@ export default function Home() {
               </div>
               <div style={{
                 overflowY: 'auto',
-                padding: '4px 12px 16px',
+                padding: '4px 16px 16px',
                 flex: 1,
                 minHeight: 0,
+                WebkitOverflowScrolling: 'touch',
               }}>
                 {leaderboard && leaderboard.rows.length === 0 && (
-                  <div style={{ color: '#666', fontSize: 12, textAlign: 'center', padding: '24px 0' }}>
+                  <div style={{ color: '#ccc', fontSize: 16, textAlign: 'center', padding: '40px 24px', lineHeight: 1.6 }}>
                     No qualifying wallets this epoch yet.
                     <br />Be first — mint and get reactions to jump on the board.
                   </div>
@@ -5183,52 +5209,58 @@ export default function Home() {
                       style={{
                         display: 'flex',
                         alignItems: 'center',
-                        gap: 10,
-                        padding: '10px 10px',
-                        borderRadius: 10,
-                        background: isMe ? 'rgba(255,215,0,0.10)' : 'rgba(255,255,255,0.03)',
-                        border: isMe ? '1px solid rgba(255,215,0,0.4)' : '1px solid rgba(255,255,255,0.04)',
-                        marginBottom: 4,
+                        gap: 14,
+                        padding: '14px 12px',
+                        borderRadius: 12,
+                        background: isMe ? 'rgba(255,215,0,0.14)' : 'rgba(255,255,255,0.05)',
+                        border: isMe ? '1.5px solid rgba(255,215,0,0.5)' : '1px solid rgba(255,255,255,0.08)',
+                        marginBottom: 8,
                       }}
                     >
                       <div style={{
-                        width: 32,
+                        width: 44,
                         textAlign: 'center',
                         fontFamily: 'monospace',
-                        fontWeight: 700,
-                        color: row.rank <= 3 ? '#ffd700' : '#888',
-                        fontSize: row.rank <= 3 ? 18 : 13,
+                        fontWeight: 800,
+                        color: row.rank <= 3 ? '#ffd700' : '#e0e0e0',
+                        fontSize: row.rank <= 3 ? 26 : 18,
                       }}>
                         {medal ?? `#${row.rank}`}
                       </div>
-                      <TrustBadge tier={row.tier} size={26} />
+                      <TrustBadge tier={row.tier} size={40} />
                       <div style={{ flex: 1, minWidth: 0 }}>
                         <div style={{
                           fontFamily: 'monospace',
-                          fontSize: 10,
-                          color: '#aaa',
+                          fontSize: 13,
+                          color: '#fff',
+                          fontWeight: 600,
                           overflow: 'hidden',
                           textOverflow: 'ellipsis',
                           whiteSpace: 'nowrap',
                         }}>
                           {row.wallet.slice(0, 6)}…{row.wallet.slice(-4)}
-                          {isMe && <span style={{ color: '#ffd700', marginLeft: 6 }}>(YOU)</span>}
+                          {isMe && <span style={{ color: '#ffd700', marginLeft: 8, fontWeight: 800 }}>(YOU)</span>}
                         </div>
-                        <div style={{ fontSize: 10, color: '#666', marginTop: 2 }}>
-                          {row.weeklyPosts}p · {row.weeklyReactions}r · {row.weeklyShares}s
+                        <div style={{ fontSize: 12, color: '#bbb', marginTop: 4, fontFamily: 'monospace' }}>
+                          <span style={{ color: '#e0e0e0' }}>{row.weeklyPosts}p</span>
+                          {' · '}
+                          <span style={{ color: '#e0e0e0' }}>{row.weeklyReactions}r</span>
+                          {' · '}
+                          <span style={{ color: '#e0e0e0' }}>{row.weeklyShares}s</span>
                         </div>
                       </div>
                       <div style={{ textAlign: 'right' }}>
                         <div style={{
                           fontFamily: 'monospace',
-                          fontSize: 13,
-                          fontWeight: 700,
+                          fontSize: 18,
+                          fontWeight: 800,
                           color: '#00ff87',
+                          textShadow: '0 0 8px rgba(0,255,135,0.3)',
                         }}>
-                          {row.payoutTon.toFixed(3)} TON
+                          {row.payoutTon.toFixed(3)}
                         </div>
-                        <div style={{ fontSize: 9, color: '#666', fontFamily: 'monospace' }}>
-                          score {Math.round(row.rankingScore)}
+                        <div style={{ fontSize: 11, color: '#aaa', fontFamily: 'monospace', fontWeight: 600, marginTop: 2 }}>
+                          TON · score {Math.round(row.rankingScore)}
                         </div>
                       </div>
                     </div>
@@ -5236,15 +5268,22 @@ export default function Home() {
                 })}
               </div>
               <div style={{
-                fontSize: 10,
-                lineHeight: 1.5,
-                color: '#666',
-                padding: '8px 16px 16px',
-                borderTop: '1px solid rgba(255,255,255,0.05)',
+                fontSize: 13,
+                lineHeight: 1.55,
+                color: '#ccc',
+                padding: '14px 20px 20px',
+                borderTop: '1px solid rgba(255,255,255,0.08)',
                 flexShrink: 0,
+                background: 'rgba(0,0,0,0.4)',
               }}>
-                Ranking = weekly (reactions×5 + shares×15 + posts×1) × 70% + all-time Trust × 30%.
-                Top 100 share 85% of mint fees. Payout every Monday 00:00 UTC.
+                <div style={{ marginBottom: 4 }}>
+                  <span style={{ color: '#e0e0e0', fontWeight: 700 }}>Ranking:</span>{' '}
+                  weekly (reactions×5 + shares×15 + posts×1) × 70% + all-time Trust × 30%.
+                </div>
+                <div>
+                  <span style={{ color: '#e0e0e0', fontWeight: 700 }}>Payout:</span>{' '}
+                  Top 100 share 85% of mint fees. Every Monday 00:00 UTC.
+                </div>
               </div>
             </div>
           </div>
@@ -5272,10 +5311,11 @@ export default function Home() {
               <div style={{ padding: '20px 24px 8px', textAlign: 'center' }}>
                 <div style={{
                   fontFamily: 'monospace',
-                  fontSize: 11,
-                  letterSpacing: 1.2,
-                  color: '#888',
-                  marginBottom: 6,
+                  fontSize: 14,
+                  fontWeight: 700,
+                  letterSpacing: 2,
+                  color: '#e0e0e0',
+                  marginBottom: 10,
                 }}>
                   TRUST SCORE
                 </div>
@@ -5326,7 +5366,7 @@ export default function Home() {
                   )
                 })()}
                 {shortTonAddr && (
-                  <div style={{ fontFamily: 'monospace', fontSize: 11, color: '#666', marginTop: 6 }}>
+                  <div style={{ fontFamily: 'monospace', fontSize: 13, color: '#bbb', marginTop: 8, fontWeight: 600 }}>
                     {shortTonAddr}
                   </div>
                 )}
@@ -5339,38 +5379,39 @@ export default function Home() {
                   marginBottom: 14,
                 }}>
                   {[
-                    { label: 'POSTS',     value: trustScore?.posts ?? 0,          weight: 2 },
-                    { label: 'REACTIONS', value: trustScore?.reactionsTotal ?? 0, weight: 8 },
-                    { label: 'SHARES',    value: trustScore?.sharesTotal ?? 0,    weight: 10 },
+                    { label: 'POSTS',     value: trustScore?.posts ?? 0,          weight: 1 },
+                    { label: 'REACTIONS', value: trustScore?.reactionsTotal ?? 0, weight: 5 },
+                    { label: 'SHARES',    value: trustScore?.sharesTotal ?? 0,    weight: 15 },
                   ].map((it) => (
                     <div key={it.label} style={{
-                      background: 'rgba(255,255,255,0.04)',
-                      border: '1px solid rgba(255,255,255,0.08)',
+                      background: 'rgba(255,255,255,0.06)',
+                      border: '1px solid rgba(255,255,255,0.14)',
                       borderRadius: 10,
-                      padding: '10px 6px',
+                      padding: '12px 6px',
                       textAlign: 'center',
                     }}>
-                      <div style={{ fontFamily: 'monospace', fontSize: 22, fontWeight: 700, color: '#00ff87' }}>
+                      <div style={{ fontFamily: 'monospace', fontSize: 28, fontWeight: 800, color: '#00ff87' }}>
                         {it.value}
                       </div>
-                      <div style={{ fontSize: 10, letterSpacing: 1, color: '#888', marginTop: 4 }}>
+                      <div style={{ fontSize: 12, letterSpacing: 1.2, color: '#ddd', marginTop: 6, fontWeight: 700 }}>
                         {it.label}
                       </div>
-                      <div style={{ fontSize: 9, color: '#555', marginTop: 2 }}>
+                      <div style={{ fontSize: 11, color: '#999', marginTop: 3, fontFamily: 'monospace', fontWeight: 600 }}>
                         ×{it.weight}
                       </div>
                     </div>
                   ))}
                 </div>
                 <div style={{
-                  fontSize: 11,
-                  lineHeight: 1.6,
-                  color: '#888',
-                  padding: '10px 12px',
-                  background: 'rgba(255,255,255,0.03)',
+                  fontSize: 13,
+                  lineHeight: 1.55,
+                  color: '#ddd',
+                  padding: '12px 14px',
+                  background: 'rgba(255,255,255,0.05)',
                   borderRadius: 8,
+                  fontWeight: 500,
                 }}>
-                  Score = posts × 2 + reactions × 8 + shares × 10, with time decay.
+                  Score = posts × 1 + reactions × 5 + shares × 15, with time decay.
                   Older activity loses weight; recent engagement drives your tier.
                   <div style={{ marginTop: 10, display: 'grid', gap: 6 }}>
                     {([
@@ -5396,13 +5437,23 @@ export default function Home() {
                         >
                           <TrustBadge
                             tier={t.tier}
-                            size={26}
-                            style={isCurrent ? undefined : { opacity: 0.55 }}
+                            size={32}
+                            style={isCurrent ? undefined : { opacity: 0.7 }}
                           />
-                          <span style={{ color: isCurrent ? t.col : '#666', fontWeight: isCurrent ? 700 : 500, flex: 1 }}>
+                          <span style={{
+                            color: isCurrent ? t.col : '#ccc',
+                            fontWeight: isCurrent ? 800 : 600,
+                            fontSize: 14,
+                            flex: 1,
+                          }}>
                             {t.tier}
                           </span>
-                          <span style={{ color: '#555', fontFamily: 'monospace' }}>{t.range}</span>
+                          <span style={{
+                            color: '#aaa',
+                            fontFamily: 'monospace',
+                            fontSize: 13,
+                            fontWeight: 600,
+                          }}>{t.range}</span>
                         </div>
                       )
                     })}
