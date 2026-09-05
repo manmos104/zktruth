@@ -2130,7 +2130,6 @@ export default function Home() {
     emoji: string
     posts: number
     reactionsTotal: number
-    sharesTotal: number
   } | null>(null);
   const [trustRefreshCount, setTrustRefreshCount] = useState(0);
   const [trustProfileOpen, setTrustProfileOpen] = useState(false);
@@ -2152,7 +2151,6 @@ export default function Home() {
       emoji: string
       weeklyPosts: number
       weeklyReactions: number
-      weeklyShares: number
       payoutShare: number
       payoutTon: number
     }>
@@ -3394,7 +3392,6 @@ export default function Home() {
             emoji: j.emoji ?? '🕯',
             posts: j.posts,
             reactionsTotal: j.reactionsTotal,
-            sharesTotal: j.sharesTotal,
           })
         }
       } catch { /* offline / cold KV — leave as null */ }
@@ -5290,8 +5287,6 @@ export default function Home() {
                           <span style={{ color: '#e0e0e0' }}>{row.weeklyPosts}p</span>
                           {' · '}
                           <span style={{ color: '#e0e0e0' }}>{row.weeklyReactions}r</span>
-                          {' · '}
-                          <span style={{ color: '#e0e0e0' }}>{row.weeklyShares}s</span>
                         </div>
                       </div>
                       <div style={{ textAlign: 'right' }}>
@@ -5323,7 +5318,7 @@ export default function Home() {
               }}>
                 <div style={{ marginBottom: 4 }}>
                   <span style={{ color: '#e0e0e0', fontWeight: 700 }}>Ranking:</span>{' '}
-                  weekly (reactions×5 + shares×15 + posts×1) × 70% + all-time Trust × 30%.
+                  weekly (reactions×5 + posts×1) × 70% + all-time Trust × 30%.
                 </div>
                 <div>
                   <span style={{ color: '#e0e0e0', fontWeight: 700 }}>Payout:</span>{' '}
@@ -5428,14 +5423,13 @@ export default function Home() {
               <div style={{ padding: '20px 24px calc(env(safe-area-inset-bottom, 0px) + 24px)', flexShrink: 0 }}>
                 <div style={{
                   display: 'grid',
-                  gridTemplateColumns: 'repeat(3, 1fr)',
+                  gridTemplateColumns: 'repeat(2, 1fr)',
                   gap: 10,
                   marginBottom: 18,
                 }}>
                   {[
                     { label: 'POSTS',     value: trustScore?.posts ?? 0,          weight: 1 },
                     { label: 'REACTIONS', value: trustScore?.reactionsTotal ?? 0, weight: 5 },
-                    { label: 'SHARES',    value: trustScore?.sharesTotal ?? 0,    weight: 15 },
                   ].map((it) => (
                     <div key={it.label} style={{
                       background: 'rgba(255,255,255,0.09)',
@@ -5465,7 +5459,7 @@ export default function Home() {
                   borderRadius: 10,
                   fontWeight: 600,
                 }}>
-                  Score = posts × 1 + reactions × 5 + shares × 15, with time decay.
+                  Score = posts × 1 + reactions × 5, with time decay.
                   Older activity loses weight; recent engagement drives your tier.
                   <div style={{ marginTop: 10, display: 'grid', gap: 6 }}>
                     {([

@@ -1,11 +1,9 @@
 import { NextResponse } from 'next/server'
 import {
   appendReaction,
-  appendShare,
   getMessageRecord,
   getRedis,
   type ReactionEvent,
-  type ShareEvent,
 } from '@/lib/trustStore'
 
 /**
@@ -33,9 +31,9 @@ import {
  * ----------------------------
  *   message_reaction_count: reflects TOTAL reactions per emoji on
  *   a channel post. We diff against the last-seen signature so
- *   removing a reaction properly subtracts score. A 🔄 (repost)
- *   reaction is treated as a share (weight × 1); everything else
- *   is a reaction (weight × 1).
+ *   removing a reaction properly subtracts score. Every emoji is
+ *   treated equally as a reaction — share tracking was removed
+ *   because Bot API doesn't expose real forward counts.
  */
 
 export const runtime = 'nodejs'
@@ -58,9 +56,6 @@ interface TelegramUpdate {
   // message_reaction (individual) — we don't need it because
   // message_reaction_count already gives us the running totals.
 }
-
-// Emoji that we treat as "signal boost" (counts as share, not reaction).
-const REPOST_EMOJIS = new Set(['🔄', '📢', '⚡', '🚀'])
 
 function emojiKey(e: ReactionCountEntry): string {
   if (e.type.type === 'emoji' && e.type.emoji) return e.type.emoji
@@ -130,23 +125,13 @@ export async function POST(request: Request) {
     for (const k of allKeys) {
       const delta = (currentMap[k] ?? 0) - (prevMap[k] ?? 0)
       if (delta === 0) continue
-      if (REPOST_EMOJIS.has(k)) {
-        const ev: ShareEvent = {
-          messageId: evt.message_id,
-          source: 'repost',
-          weight: delta, // signed — remove pulls score back
-          timestamp: now,
-        }
-        await appendShare(rec.wallet, ev)
-      } else {
-        const ev: ReactionEvent = {
-          messageId: evt.message_id,
-          emoji: k,
-          delta,
-          timestamp: now,
-        }
-        await appendReaction(rec.wallet, ev)
+      const ev: ReactionEvent = {
+        messageId: evt.message_id,
+        emoji: k,
+        delta,
+        timestamp: now,
       }
+      await appendReaction(rec.wallet, ev)
     }
 
     // Persist new signature so the next update diffs against it.

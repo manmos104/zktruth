@@ -30,10 +30,17 @@ export interface ReactionEvent {
   timestamp: number
 }
 
+/**
+ * @deprecated Share tracking removed 2026-09 — Telegram Bot API doesn't
+ * expose forward counts to bots, and the views-based approximation was
+ * unreliable (getMessages doesn't exist). Kept as a type stub so old
+ * KV records with a `shares` field still parse, and legacy imports
+ * elsewhere don't break the build. Not used by computeScore.
+ */
 export interface ShareEvent {
   messageId: number
   source: 'views' | 'repost' | 'forward'
-  weight: number      // views: each burst of 20 views = 1 share
+  weight: number
   timestamp: number
 }
 
@@ -41,7 +48,8 @@ export interface UserRecord {
   wallet: string
   posts: PostEvent[]
   reactions: ReactionEvent[]
-  shares: ShareEvent[]
+  /** @deprecated retained for backward-compat with existing KV rows. */
+  shares?: ShareEvent[]
   updatedAt: number
 }
 
@@ -85,7 +93,6 @@ export async function upsertUser(wallet: string, patch: Partial<UserRecord>): Pr
     wallet,
     posts: [],
     reactions: [],
-    shares: [],
     updatedAt: Date.now(),
   }
   const merged: UserRecord = {
@@ -103,7 +110,6 @@ export async function appendPost(wallet: string, event: PostEvent): Promise<User
     wallet,
     posts: [],
     reactions: [],
-    shares: [],
     updatedAt: 0,
   }
   // Guard against a double-mint retry producing duplicate entries for
@@ -132,23 +138,25 @@ export async function appendReaction(wallet: string, event: ReactionEvent): Prom
     wallet,
     posts: [],
     reactions: [],
-    shares: [],
     updatedAt: 0,
   }
   cur.reactions.push(event)
   return upsertUser(wallet, { reactions: cur.reactions })
 }
 
-export async function appendShare(wallet: string, event: ShareEvent): Promise<UserRecord> {
+/**
+ * @deprecated no-op. Share tracking removed — retained only so
+ * existing callers compile during the transition. Delete once every
+ * import site is cleaned up.
+ */
+export async function appendShare(wallet: string, _event: ShareEvent): Promise<UserRecord> {
   const cur = (await getUser(wallet)) ?? {
     wallet,
     posts: [],
     reactions: [],
-    shares: [],
     updatedAt: 0,
   }
-  cur.shares.push(event)
-  return upsertUser(wallet, { shares: cur.shares })
+  return cur
 }
 
 export async function getMessageRecord(msgId: number | string): Promise<MessageRecord | null> {
@@ -169,12 +177,14 @@ export async function saveMessageRecord(rec: MessageRecord): Promise<void> {
 // weighting requested. Every event decays with time so long-idle accounts
 // gradually surrender rank to active ones.
 
-// Weights tuned so shares dominate (viral value = signal), reactions
-// middle (external validation), posts weakest (spammable via self-mint).
-// Anti-spam caps applied at write-time (see appendPost).
+// Weights: reactions (external validation) dominate; posts (spammable
+// via self-mint, so daily-capped) provide a small baseline. Share
+// tracking was removed because Telegram Bot API doesn't surface real
+// forward counts to bots — see the ShareEvent @deprecated note above.
 export const POST_WEIGHT = 1
 export const REACTION_WEIGHT = 5
-export const SHARE_WEIGHT = 15
+/** @deprecated retained for legacy imports; not used by computeScore. */
+export const SHARE_WEIGHT = 0
 // Multiplicative boost when a capture passed Telegram initData
 // verification AND has anomaly severity below 20. Applied post-hoc
 // in computeScore.
@@ -236,16 +246,13 @@ export interface TrustBreakdown {
   emoji: string
   posts: number
   reactionsTotal: number
-  sharesTotal: number
   postsScore: number
   reactionsScore: number
-  sharesScore: number
   // Ranking-score inputs — needed by the leaderboard endpoint to
   // combine last-7-days activity with all-time Trust Score. Exposed
   // separately so callers can render "weekly rank vs baseline" UI.
   weeklyPosts: number
   weeklyReactions: number
-  weeklyShares: number
   rankingScore: number
 }
 
@@ -261,13 +268,10 @@ export function computeScore(user: UserRecord | null, now = Date.now()): TrustBr
       emoji: t.emoji,
       posts: 0,
       reactionsTotal: 0,
-      sharesTotal: 0,
       postsScore: 0,
       reactionsScore: 0,
-      sharesScore: 0,
       weeklyPosts: 0,
       weeklyReactions: 0,
-      weeklyShares: 0,
       rankingScore: 0,
     }
   }
@@ -280,11 +284,7 @@ export function computeScore(user: UserRecord | null, now = Date.now()): TrustBr
     (s, r) => s + REACTION_WEIGHT * r.delta * decay(now, r.timestamp),
     0,
   )
-  const sharesScore = user.shares.reduce(
-    (s, sh) => s + SHARE_WEIGHT * sh.weight * decay(now, sh.timestamp),
-    0,
-  )
-  const rawScore = postsScore + reactionsScore + sharesScore
+  const rawScore = postsScore + reactionsScore
 
   // Attestation multiplier — if *any* recent post carried a
   // Telegram-verified low-anomaly claim, apply the trust boost. We
@@ -303,13 +303,9 @@ export function computeScore(user: UserRecord | null, now = Date.now()): TrustBr
   const weeklyReactions = user.reactions
     .filter((r) => r.timestamp >= weekAgo)
     .reduce((s, r) => s + Math.max(0, r.delta), 0)
-  const weeklyShares = user.shares
-    .filter((sh) => sh.timestamp >= weekAgo)
-    .reduce((s, sh) => s + Math.max(0, sh.weight), 0)
 
   const weeklyRaw =
     weeklyReactions * REACTION_WEIGHT +
-    weeklyShares * SHARE_WEIGHT +
     weeklyPosts * POST_WEIGHT
   const rankingScore =
     Math.round((weeklyRaw * 0.7 + score * 0.3) * multiplier * 10) / 10
@@ -320,13 +316,10 @@ export function computeScore(user: UserRecord | null, now = Date.now()): TrustBr
     emoji: meta.emoji,
     posts: user.posts.length,
     reactionsTotal: user.reactions.reduce((s, r) => s + r.delta, 0),
-    sharesTotal: user.shares.reduce((s, sh) => s + sh.weight, 0),
     postsScore: Math.round(postsScore * 10) / 10,
     reactionsScore: Math.round(reactionsScore * 10) / 10,
-    sharesScore: Math.round(sharesScore * 10) / 10,
     weeklyPosts,
     weeklyReactions,
-    weeklyShares,
     rankingScore,
   }
 }

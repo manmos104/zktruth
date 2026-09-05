@@ -35,7 +35,6 @@ interface LeaderboardRow {
   emoji: string
   weeklyPosts: number
   weeklyReactions: number
-  weeklyShares: number
   payoutShare: number
   payoutTon: number
 }
@@ -84,7 +83,6 @@ export async function GET() {
         emoji: entry.b.emoji,
         weeklyPosts: entry.b.weeklyPosts,
         weeklyReactions: entry.b.weeklyReactions,
-        weeklyShares: entry.b.weeklyShares,
         payoutShare: share,
         payoutTon: Math.round(poolTon * share * 1000) / 1000,
       }
