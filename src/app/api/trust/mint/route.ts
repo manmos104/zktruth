@@ -8,6 +8,7 @@ import {
   type MessageRecord,
   type ShareEvent,
 } from '@/lib/trustStore'
+import { creditMintToPool } from '@/lib/rewardPool'
 
 /**
  * Record a successful zkTruth mint against the author's wallet.
@@ -80,6 +81,11 @@ export async function POST(request: Request) {
 
     // Credit the wallet with a post event either way.
     await appendPost(wallet, { messageId, timestamp: now })
+
+    // Contribute this mint's share (0.085 TON) to the current epoch's
+    // Reward Pool ledger. Best-effort — a KV blip mustn't undo the
+    // post credit above.
+    try { await creditMintToPool(messageId) } catch { /* ignore */ }
 
     // Attestation bonus / penalty — read the claim record produced by
     // /api/attest/claim (indexed by content hash) and adjust the

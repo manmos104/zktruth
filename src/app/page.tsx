@@ -2134,6 +2134,42 @@ export default function Home() {
   } | null>(null);
   const [trustRefreshCount, setTrustRefreshCount] = useState(0);
   const [trustProfileOpen, setTrustProfileOpen] = useState(false);
+  // Weekly leaderboard modal: shows top 50 by ranking score + current
+  // reward pool + countdown to next payout. Fetched from /api/leaderboard/current
+  // on open.
+  const [leaderboardOpen, setLeaderboardOpen] = useState(false);
+  const [leaderboard, setLeaderboard] = useState<{
+    epochId: string
+    poolTon: number
+    mintCount: number
+    nextPayoutMs: number
+    rows: Array<{
+      rank: number
+      wallet: string
+      rankingScore: number
+      allTimeScore: number
+      tier: TrustTierType
+      emoji: string
+      weeklyPosts: number
+      weeklyReactions: number
+      weeklyShares: number
+      payoutShare: number
+      payoutTon: number
+    }>
+  } | null>(null);
+  useEffect(() => {
+    if (!leaderboardOpen) return
+    let cancelled = false
+    ;(async () => {
+      try {
+        const r = await fetch('/api/leaderboard/current?t=' + Date.now(), { cache: 'no-store' })
+        if (!r.ok) return
+        const j = await r.json()
+        if (!cancelled) setLeaderboard(j)
+      } catch { /* offline */ }
+    })()
+    return () => { cancelled = true }
+  }, [leaderboardOpen]);
   const [mintStep, setMintStep] = useState(0);
   const [mintComplete, setMintComplete] = useState(false);
   const [proofData, setProofData] = useState<any>(null);
@@ -4385,6 +4421,31 @@ export default function Home() {
                   </div>
                 )
               })()}
+              {/* Weekly Leaderboard button. Opens a modal with top-50
+                  ranking + current TON reward pool + payout countdown. */}
+              {tonWallet && (
+                <div>
+                  <button
+                    className="side-btn"
+                    onClick={() => setLeaderboardOpen(true)}
+                    aria-label="Open weekly leaderboard"
+                    style={{ color: '#ffd700', borderColor: 'rgba(255,215,0,0.4)' }}
+                  >
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{width:22,height:22}} strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M6 9V5a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v4" />
+                      <path d="M6 9a4 4 0 0 0 4 4h4a4 4 0 0 0 4-4" />
+                      <path d="M3 5h3v4a3 3 0 0 1-3-3V5z" />
+                      <path d="M21 5h-3v4a3 3 0 0 0 3-3V5z" />
+                      <path d="M9 18h6" />
+                      <path d="M10 22h4" />
+                      <path d="M12 13v9" />
+                    </svg>
+                  </button>
+                  <div className="side-btn-label" style={{ color: '#ffd700' }}>
+                    RANK
+                  </div>
+                </div>
+              )}
               {/* CRT / broadcast-noise toggle. Off by default (evidence
                   first); flipping it on adds scanlines + grain +
                   vignette to captures for a retro TV aesthetic. Choice
@@ -5042,6 +5103,152 @@ export default function Home() {
           </div>
         )}
 
+        {/* Weekly Leaderboard modal. Ranks the top 50 wallets by the
+            hybrid ranking score (weekly-heavy) and shows the projected
+            TON payout each would receive if the epoch closed now. */}
+        {leaderboardOpen && (
+          <div
+            className="privacy-modal-backdrop"
+            onClick={() => setLeaderboardOpen(false)}
+          >
+            <div
+              className="privacy-modal"
+              onClick={(e) => e.stopPropagation()}
+              style={{ maxWidth: 420, maxHeight: '90vh', display: 'flex', flexDirection: 'column' }}
+            >
+              <button
+                className="privacy-modal-close"
+                onClick={() => setLeaderboardOpen(false)}
+                aria-label="Close"
+              >✕</button>
+              <div style={{ padding: '20px 22px 12px', textAlign: 'center', flexShrink: 0 }}>
+                <div style={{
+                  fontFamily: 'monospace',
+                  fontSize: 11,
+                  letterSpacing: 1.4,
+                  color: '#888',
+                  marginBottom: 6,
+                }}>
+                  WEEKLY LEADERBOARD
+                </div>
+                <div style={{
+                  fontFamily: 'monospace',
+                  fontSize: 40,
+                  fontWeight: 700,
+                  color: '#ffd700',
+                  lineHeight: 1,
+                  textShadow: '0 0 20px rgba(255,215,0,0.4)',
+                }}>
+                  {leaderboard ? leaderboard.poolTon.toFixed(3) : '—'} <span style={{ fontSize: 20 }}>TON</span>
+                </div>
+                <div style={{ fontSize: 11, color: '#888', marginTop: 6 }}>
+                  Prize pool · {leaderboard?.mintCount ?? 0} mints this week
+                </div>
+                {leaderboard?.nextPayoutMs && (() => {
+                  const msLeft = Math.max(0, leaderboard.nextPayoutMs - Date.now())
+                  const days = Math.floor(msLeft / 86_400_000)
+                  const hours = Math.floor((msLeft % 86_400_000) / 3_600_000)
+                  return (
+                    <div style={{ fontSize: 10, color: '#666', marginTop: 4, fontFamily: 'monospace' }}>
+                      Payout in {days}d {hours}h · Epoch {leaderboard.epochId}
+                    </div>
+                  )
+                })()}
+              </div>
+              <div style={{
+                overflowY: 'auto',
+                padding: '4px 12px 16px',
+                flex: 1,
+                minHeight: 0,
+              }}>
+                {leaderboard && leaderboard.rows.length === 0 && (
+                  <div style={{ color: '#666', fontSize: 12, textAlign: 'center', padding: '24px 0' }}>
+                    No qualifying wallets this epoch yet.
+                    <br />Be first — mint and get reactions to jump on the board.
+                  </div>
+                )}
+                {leaderboard?.rows.map((row) => {
+                  const isMe = tonWallet?.account.address &&
+                    row.wallet.toLowerCase() === (() => {
+                      try {
+                        return Address.parse(tonWallet.account.address).toString({
+                          urlSafe: true, bounceable: false, testOnly: false,
+                        }).toLowerCase()
+                      } catch { return '' }
+                    })()
+                  const medal = row.rank === 1 ? '🥇' : row.rank === 2 ? '🥈' : row.rank === 3 ? '🥉' : null
+                  return (
+                    <div
+                      key={row.wallet}
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: 10,
+                        padding: '10px 10px',
+                        borderRadius: 10,
+                        background: isMe ? 'rgba(255,215,0,0.10)' : 'rgba(255,255,255,0.03)',
+                        border: isMe ? '1px solid rgba(255,215,0,0.4)' : '1px solid rgba(255,255,255,0.04)',
+                        marginBottom: 4,
+                      }}
+                    >
+                      <div style={{
+                        width: 32,
+                        textAlign: 'center',
+                        fontFamily: 'monospace',
+                        fontWeight: 700,
+                        color: row.rank <= 3 ? '#ffd700' : '#888',
+                        fontSize: row.rank <= 3 ? 18 : 13,
+                      }}>
+                        {medal ?? `#${row.rank}`}
+                      </div>
+                      <TrustBadge tier={row.tier} size={26} />
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{
+                          fontFamily: 'monospace',
+                          fontSize: 10,
+                          color: '#aaa',
+                          overflow: 'hidden',
+                          textOverflow: 'ellipsis',
+                          whiteSpace: 'nowrap',
+                        }}>
+                          {row.wallet.slice(0, 6)}…{row.wallet.slice(-4)}
+                          {isMe && <span style={{ color: '#ffd700', marginLeft: 6 }}>(YOU)</span>}
+                        </div>
+                        <div style={{ fontSize: 10, color: '#666', marginTop: 2 }}>
+                          {row.weeklyPosts}p · {row.weeklyReactions}r · {row.weeklyShares}s
+                        </div>
+                      </div>
+                      <div style={{ textAlign: 'right' }}>
+                        <div style={{
+                          fontFamily: 'monospace',
+                          fontSize: 13,
+                          fontWeight: 700,
+                          color: '#00ff87',
+                        }}>
+                          {row.payoutTon.toFixed(3)} TON
+                        </div>
+                        <div style={{ fontSize: 9, color: '#666', fontFamily: 'monospace' }}>
+                          score {Math.round(row.rankingScore)}
+                        </div>
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+              <div style={{
+                fontSize: 10,
+                lineHeight: 1.5,
+                color: '#666',
+                padding: '8px 16px 16px',
+                borderTop: '1px solid rgba(255,255,255,0.05)',
+                flexShrink: 0,
+              }}>
+                Ranking = weekly (reactions×5 + shares×15 + posts×1) × 70% + all-time Trust × 30%.
+                Top 100 share 85% of mint fees. Payout every Monday 00:00 UTC.
+              </div>
+            </div>
+          </div>
+        )}
         {/* Trust Score profile modal. Tapping the sidebar chip opens
             this — shows the full breakdown (posts / reactions / shares)
             plus the current tier badge. Data is fetched from the KV-

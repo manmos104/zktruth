@@ -107,8 +107,22 @@ export async function appendPost(wallet: string, event: PostEvent): Promise<User
     updatedAt: 0,
   }
   // Guard against a double-mint retry producing duplicate entries for
-  // the same channel message.
-  if (cur.posts.some((p) => p.messageId === event.messageId)) return cur
+  // the same channel message. (messageId 0 is the "no-post mint" case
+  // and CAN legitimately appear multiple times per wallet.)
+  if (event.messageId > 0 && cur.posts.some((p) => p.messageId === event.messageId)) return cur
+
+  // Anti-spam: enforce DAILY_POST_CAP by counting existing posts within
+  // the same UTC day. On-chain mint still succeeded; we just skip the
+  // Trust Score credit for anything beyond the daily allowance.
+  const dayStart = new Date(event.timestamp)
+  dayStart.setUTCHours(0, 0, 0, 0)
+  const dayStartMs = dayStart.getTime()
+  const dayEndMs = dayStartMs + 86_400_000
+  const todayCount = cur.posts.filter(
+    (p) => p.timestamp >= dayStartMs && p.timestamp < dayEndMs,
+  ).length
+  if (todayCount >= DAILY_POST_CAP) return cur
+
   cur.posts.push(event)
   return upsertUser(wallet, { posts: cur.posts })
 }
@@ -155,9 +169,20 @@ export async function saveMessageRecord(rec: MessageRecord): Promise<void> {
 // weighting requested. Every event decays with time so long-idle accounts
 // gradually surrender rank to active ones.
 
-export const POST_WEIGHT = 2
-export const REACTION_WEIGHT = 8
-export const SHARE_WEIGHT = 10
+// Weights tuned so shares dominate (viral value = signal), reactions
+// middle (external validation), posts weakest (spammable via self-mint).
+// Anti-spam caps applied at write-time (see appendPost).
+export const POST_WEIGHT = 1
+export const REACTION_WEIGHT = 5
+export const SHARE_WEIGHT = 15
+// Multiplicative boost when a capture passed Telegram initData
+// verification AND has anomaly severity below 20. Applied post-hoc
+// in computeScore.
+export const ATTESTATION_MULTIPLIER = 1.3
+// Anti-spam: cap the number of post events credited per wallet per
+// calendar day (UTC). On-chain mints beyond this still succeed and
+// keep their NFTs — they just don't add to Trust Score.
+export const DAILY_POST_CAP = 5
 
 // Decay: weight / (1 + days * 0.05)
 //   1 day old   → ×0.95
@@ -215,7 +240,17 @@ export interface TrustBreakdown {
   postsScore: number
   reactionsScore: number
   sharesScore: number
+  // Ranking-score inputs — needed by the leaderboard endpoint to
+  // combine last-7-days activity with all-time Trust Score. Exposed
+  // separately so callers can render "weekly rank vs baseline" UI.
+  weeklyPosts: number
+  weeklyReactions: number
+  weeklyShares: number
+  rankingScore: number
 }
+
+// 7-day rolling window in ms.
+const WEEK_MS = 7 * 86_400_000
 
 export function computeScore(user: UserRecord | null, now = Date.now()): TrustBreakdown {
   if (!user) {
@@ -230,13 +265,17 @@ export function computeScore(user: UserRecord | null, now = Date.now()): TrustBr
       postsScore: 0,
       reactionsScore: 0,
       sharesScore: 0,
+      weeklyPosts: 0,
+      weeklyReactions: 0,
+      weeklyShares: 0,
+      rankingScore: 0,
     }
   }
+
   const postsScore = user.posts.reduce(
     (s, p) => s + POST_WEIGHT * decay(now, p.timestamp),
     0,
   )
-  // Reactions are net (+1/-1) so removing a reaction pulls score back.
   const reactionsScore = user.reactions.reduce(
     (s, r) => s + REACTION_WEIGHT * r.delta * decay(now, r.timestamp),
     0,
@@ -245,8 +284,35 @@ export function computeScore(user: UserRecord | null, now = Date.now()): TrustBr
     (s, sh) => s + SHARE_WEIGHT * sh.weight * decay(now, sh.timestamp),
     0,
   )
-  const score = Math.max(0, Math.round((postsScore + reactionsScore + sharesScore) * 10) / 10)
+  const rawScore = postsScore + reactionsScore + sharesScore
+
+  // Attestation multiplier — if *any* recent post carried a
+  // Telegram-verified low-anomaly claim, apply the trust boost. We
+  // check the last post because that's what our ingestion pipeline
+  // could stamp — future work can extend to per-event flags.
+  const hasAttestation = user.posts.some(
+    (p) => (p as unknown as { attested?: boolean }).attested === true,
+  )
+  const multiplier = hasAttestation ? ATTESTATION_MULTIPLIER : 1
+  const score = Math.max(0, Math.round(rawScore * multiplier * 10) / 10)
   const meta = tierForScore(score)
+
+  // 7-day rolling counts feed the leaderboard's weekly-heavy ranking.
+  const weekAgo = now - WEEK_MS
+  const weeklyPosts = user.posts.filter((p) => p.timestamp >= weekAgo).length
+  const weeklyReactions = user.reactions
+    .filter((r) => r.timestamp >= weekAgo)
+    .reduce((s, r) => s + Math.max(0, r.delta), 0)
+  const weeklyShares = user.shares
+    .filter((sh) => sh.timestamp >= weekAgo)
+    .reduce((s, sh) => s + Math.max(0, sh.weight), 0)
+
+  const weeklyRaw =
+    weeklyReactions * REACTION_WEIGHT +
+    weeklyShares * SHARE_WEIGHT +
+    weeklyPosts * POST_WEIGHT
+  const rankingScore =
+    Math.round((weeklyRaw * 0.7 + score * 0.3) * multiplier * 10) / 10
 
   return {
     score,
@@ -258,5 +324,9 @@ export function computeScore(user: UserRecord | null, now = Date.now()): TrustBr
     postsScore: Math.round(postsScore * 10) / 10,
     reactionsScore: Math.round(reactionsScore * 10) / 10,
     sharesScore: Math.round(sharesScore * 10) / 10,
+    weeklyPosts,
+    weeklyReactions,
+    weeklyShares,
+    rankingScore,
   }
 }

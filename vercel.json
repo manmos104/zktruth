@@ -3,6 +3,10 @@
     {
       "path": "/api/trust/poll-views",
       "schedule": "0 3 * * *"
+    },
+    {
+      "path": "/api/reward/close-epoch",
+      "schedule": "5 0 * * 1"
     }
   ]
 }
