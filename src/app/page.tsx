@@ -2961,14 +2961,14 @@ export default function Home() {
             const sy = (vh - side) / 2;
             nftCtx.drawImage(v, sx, sy, side, side, 0, 0, NFT_EDGE, NFT_EDGE);
             if (crtMode) drawCrtOverlay(nftCtx, NFT_EDGE, NFT_EDGE);
-            // NOTE: the zkTruth wordmark watermark + timestamp/GPS/hash
-            // overlays used to be baked into rawImage here. They were
-            // removed 2026-09 at the user's request — the on-screen
-            // viewfinder still shows them (via the .meta-overlay and
-            // .top-bar DOM elements) as a shooting aid, but the actual
-            // captured pixels stay clean so the NFT reads as a plain
-            // photo. The proof metadata still ships in the NFT's
-            // attributes JSON (timestamp / GPS / hash / claim digest).
+            // Keep the semi-transparent centered zkTruth wordmark as a
+            // brand mark on the NFT / preview / Telegram share. The
+            // detailed proof overlays (timestamp / GPS / hash badges
+            // in the corners) were stripped 2026-09 to keep the tile
+            // reading as a plain photo — the on-screen viewfinder DOM
+            // still shows those values as a shooting aid, and the
+            // NFT's attributes JSON continues to carry them off-image.
+            drawZkTruthWatermark(nftCtx, NFT_EDGE, NFT_EDGE, wordmarkRef.current);
             rawImage = nftC.toDataURL('image/jpeg', 0.9);
             // Unify: capturedImage (used by preview + Telegram post)
             // becomes the SAME square. This drops the old branded
@@ -3144,11 +3144,12 @@ export default function Home() {
         // the recorded video reads as live static rather than a still
         // pattern. Only runs when the user has opted in.
         if (crtMode) drawCrtOverlay(ctx, pw, ph);
-        // Wordmark + timestamp/GPS/hash overlays deliberately NOT
-        // baked into recorded frames — the viewfinder DOM shows them
-        // as a shooting aid, but the recorded pixels stay clean so
-        // the NFT + Telegram post look like an unbranded video.
-        // Proof metadata still ships as NFT attributes.
+        // Keep the centered zkTruth wordmark on every recorded frame
+        // as a brand mark. The detailed proof overlays (timestamp /
+        // GPS / hash badges) were stripped 2026-09 to keep the video
+        // reading as a plain clip; those values still live in the
+        // NFT's attributes JSON and the video's poster JPEG.
+        drawZkTruthWatermark(ctx, pw, ph, wordmarkRef.current);
 
         recAnimFrameRef.current = requestAnimationFrame(drawFrame);
       };
