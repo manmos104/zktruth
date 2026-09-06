@@ -2169,10 +2169,11 @@ async function extractFirstFrameJpeg(
           const ctx = canvas.getContext('2d')
           if (!ctx) return done(null)
           ctx.drawImage(el, 0, 0, w, h)
-          // Bake the timestamp / GPS / chain / hash badges directly
-          // onto the poster so wallet tiles look identical to photo
-          // NFTs — the video itself stays clean for playback.
-          if (overlay) drawZkTruthOverlays(ctx, w, h, overlay)
+          // Overlays intentionally NOT baked into the poster JPEG —
+          // matches the photo NFT which is also unbranded now. The
+          // `overlay` argument is retained for API compatibility with
+          // older callers but the values are ignored.
+          void overlay
           canvas.toBlob(
             (b) => {
               clearTimeout(timeout)
@@ -2960,8 +2961,14 @@ export default function Home() {
             const sy = (vh - side) / 2;
             nftCtx.drawImage(v, sx, sy, side, side, 0, 0, NFT_EDGE, NFT_EDGE);
             if (crtMode) drawCrtOverlay(nftCtx, NFT_EDGE, NFT_EDGE);
-            drawZkTruthWatermark(nftCtx, NFT_EDGE, NFT_EDGE, wordmarkRef.current);
-            drawZkTruthOverlays(nftCtx, NFT_EDGE, NFT_EDGE, { timeStr, gps, hash });
+            // NOTE: the zkTruth wordmark watermark + timestamp/GPS/hash
+            // overlays used to be baked into rawImage here. They were
+            // removed 2026-09 at the user's request — the on-screen
+            // viewfinder still shows them (via the .meta-overlay and
+            // .top-bar DOM elements) as a shooting aid, but the actual
+            // captured pixels stay clean so the NFT reads as a plain
+            // photo. The proof metadata still ships in the NFT's
+            // attributes JSON (timestamp / GPS / hash / claim digest).
             rawImage = nftC.toDataURL('image/jpeg', 0.9);
             // Unify: capturedImage (used by preview + Telegram post)
             // becomes the SAME square. This drops the old branded
@@ -3137,15 +3144,11 @@ export default function Home() {
         // the recorded video reads as live static rather than a still
         // pattern. Only runs when the user has opted in.
         if (crtMode) drawCrtOverlay(ctx, pw, ph);
-        // Center wordmark watermark on every frame.
-        drawZkTruthWatermark(ctx, pw, ph, wordmarkRef.current);
-
-        // Bake proof metadata onto every frame.
-        drawZkTruthOverlays(ctx, pw, ph, {
-          timeStr: recStartTsStr,
-          gps: recStartGps,
-          hash: recStartHash,
-        });
+        // Wordmark + timestamp/GPS/hash overlays deliberately NOT
+        // baked into recorded frames — the viewfinder DOM shows them
+        // as a shooting aid, but the recorded pixels stay clean so
+        // the NFT + Telegram post look like an unbranded video.
+        // Proof metadata still ships as NFT attributes.
 
         recAnimFrameRef.current = requestAnimationFrame(drawFrame);
       };
