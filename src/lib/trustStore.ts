@@ -21,6 +21,13 @@ import { Redis } from '@upstash/redis'
 export interface PostEvent {
   messageId: number
   timestamp: number // ms since epoch
+  // 'mint' = paid NFT mint (0.15 TON on-chain, natural anti-spam via gas).
+  // 'free' = zero-cost hash-only channel post (daily-capped, weight 1).
+  // Optional so legacy records (pre-2026-09) — which were all effectively
+  // 'mint' before free-post credit landed, then all 'free' after — parse
+  // as 'free' to avoid retroactively promoting spam posts. Callers on
+  // the mint path MUST send 'mint' explicitly.
+  kind?: 'free' | 'mint'
 }
 
 export interface ReactionEvent {
@@ -117,17 +124,22 @@ export async function appendPost(wallet: string, event: PostEvent): Promise<User
   // and CAN legitimately appear multiple times per wallet.)
   if (event.messageId > 0 && cur.posts.some((p) => p.messageId === event.messageId)) return cur
 
-  // Anti-spam: enforce DAILY_POST_CAP by counting existing posts within
-  // the same UTC day. On-chain mint still succeeded; we just skip the
-  // Trust Score credit for anything beyond the daily allowance.
-  const dayStart = new Date(event.timestamp)
-  dayStart.setUTCHours(0, 0, 0, 0)
-  const dayStartMs = dayStart.getTime()
-  const dayEndMs = dayStartMs + 86_400_000
-  const todayCount = cur.posts.filter(
-    (p) => p.timestamp >= dayStartMs && p.timestamp < dayEndMs,
-  ).length
-  if (todayCount >= DAILY_POST_CAP) return cur
+  // Anti-spam: enforce DAILY_POST_CAP on FREE posts only. Mints are
+  // gated by real TON gas + service fee, which is a much stronger
+  // deterrent than a numeric cap. A free post beyond the daily limit
+  // still lands on the channel — we just skip crediting it.
+  if ((event.kind ?? 'free') === 'free') {
+    const dayStart = new Date(event.timestamp)
+    dayStart.setUTCHours(0, 0, 0, 0)
+    const dayStartMs = dayStart.getTime()
+    const dayEndMs = dayStartMs + 86_400_000
+    const todayFreeCount = cur.posts.filter(
+      (p) => (p.kind ?? 'free') === 'free'
+        && p.timestamp >= dayStartMs
+        && p.timestamp < dayEndMs,
+    ).length
+    if (todayFreeCount >= DAILY_POST_CAP) return cur
+  }
 
   cur.posts.push(event)
   return upsertUser(wallet, { posts: cur.posts })
@@ -177,11 +189,13 @@ export async function saveMessageRecord(rec: MessageRecord): Promise<void> {
 // weighting requested. Every event decays with time so long-idle accounts
 // gradually surrender rank to active ones.
 
-// Weights: reactions (external validation) dominate; posts (spammable
-// via self-mint, so daily-capped) provide a small baseline. Share
-// tracking was removed because Telegram Bot API doesn't surface real
-// forward counts to bots — see the ShareEvent @deprecated note above.
-export const POST_WEIGHT = 1
+// Weights: NFT mints (real economic commitment via TON gas + service
+// fee) get 10× the free-post baseline; reactions (external validation)
+// sit at 5×. Combined with the gate below, this makes the reward pool
+// effectively unreachable without at least one paid mint, while still
+// letting engaged non-minters accumulate a public tier.
+export const POST_WEIGHT = 1        // free hash-only channel post
+export const MINT_WEIGHT = 10       // paid NFT mint (kind === 'mint')
 export const REACTION_WEIGHT = 5
 /** @deprecated retained for legacy imports; not used by computeScore. */
 export const SHARE_WEIGHT = 0
@@ -224,12 +238,16 @@ export interface TierMeta {
   min: number
 }
 
+// Tier thresholds re-scaled 2026-09 alongside the mint-weight (10)
+// bump. Muckraker+ now requires sustained paid activity — roughly 2–3
+// months for Muckraker, ~1 year for Investigative Reporter, and a
+// viral run for Truth-Teller.
 export const TIERS: TierMeta[] = [
   { tier: 'Source',                 emoji: '🕯', color: '#8b8b8b', glow: 'transparent',           min: 0 },
-  { tier: 'Whistleblower',          emoji: '📢', color: '#4dd4ff', glow: 'rgba(77,212,255,0.35)', min: 50 },
-  { tier: 'Muckraker',              emoji: '🔦', color: '#ffcf5c', glow: 'rgba(255,207,92,0.35)', min: 200 },
-  { tier: 'Investigative Reporter', emoji: '🔍', color: '#ff7a4d', glow: 'rgba(255,122,77,0.4)',  min: 1000 },
-  { tier: 'Truth-Teller',           emoji: '⚖️', color: '#00ff87', glow: 'rgba(0,255,135,0.5)',   min: 5000 },
+  { tier: 'Whistleblower',          emoji: '📢', color: '#4dd4ff', glow: 'rgba(77,212,255,0.35)', min: 100 },
+  { tier: 'Muckraker',              emoji: '🔦', color: '#ffcf5c', glow: 'rgba(255,207,92,0.35)', min: 500 },
+  { tier: 'Investigative Reporter', emoji: '🔍', color: '#ff7a4d', glow: 'rgba(255,122,77,0.4)',  min: 2500 },
+  { tier: 'Truth-Teller',           emoji: '⚖️', color: '#00ff87', glow: 'rgba(0,255,135,0.5)',   min: 10000 },
 ]
 
 export function tierForScore(score: number): TierMeta {
@@ -244,14 +262,22 @@ export interface TrustBreakdown {
   score: number
   tier: TrustTier
   emoji: string
+  // `posts` counts FREE hash-only channel posts; `mints` counts paid
+  // NFT mint posts. Separated so the profile UI can show the 3-tile
+  // POSTS / MINTS / REACTIONS breakdown and callers can gate on
+  // hasMinted directly.
   posts: number
+  mints: number
   reactionsTotal: number
+  hasMinted: boolean
   postsScore: number
+  mintsScore: number
   reactionsScore: number
   // Ranking-score inputs — needed by the leaderboard endpoint to
   // combine last-7-days activity with all-time Trust Score. Exposed
   // separately so callers can render "weekly rank vs baseline" UI.
   weeklyPosts: number
+  weeklyMints: number
   weeklyReactions: number
   rankingScore: number
 }
@@ -267,24 +293,64 @@ export function computeScore(user: UserRecord | null, now = Date.now()): TrustBr
       tier: t.tier,
       emoji: t.emoji,
       posts: 0,
+      mints: 0,
       reactionsTotal: 0,
+      hasMinted: false,
       postsScore: 0,
+      mintsScore: 0,
       reactionsScore: 0,
       weeklyPosts: 0,
+      weeklyMints: 0,
       weeklyReactions: 0,
       rankingScore: 0,
     }
   }
 
-  const postsScore = user.posts.reduce(
+  // Partition posts by kind so we can weight them differently and
+  // count them separately in the breakdown.
+  const freePosts = user.posts.filter((p) => (p.kind ?? 'free') === 'free')
+  const mintPosts = user.posts.filter((p) => p.kind === 'mint')
+  const hasMinted = mintPosts.length > 0
+
+  // GATE: no paid mint on record → no score, no ranking, no payout.
+  // We still return the raw counts so the profile UI can nudge the
+  // user toward their first mint ("MINT 1 to unlock Trust Score").
+  const rawPostReactionCounts = {
+    posts: freePosts.length,
+    mints: mintPosts.length,
+    reactionsTotal: user.reactions.reduce((s, r) => s + r.delta, 0),
+  }
+  if (!hasMinted) {
+    const t = tierForScore(0)
+    return {
+      score: 0,
+      tier: t.tier,
+      emoji: t.emoji,
+      ...rawPostReactionCounts,
+      hasMinted: false,
+      postsScore: 0,
+      mintsScore: 0,
+      reactionsScore: 0,
+      weeklyPosts: 0,
+      weeklyMints: 0,
+      weeklyReactions: 0,
+      rankingScore: 0,
+    }
+  }
+
+  const postsScore = freePosts.reduce(
     (s, p) => s + POST_WEIGHT * decay(now, p.timestamp),
+    0,
+  )
+  const mintsScore = mintPosts.reduce(
+    (s, p) => s + MINT_WEIGHT * decay(now, p.timestamp),
     0,
   )
   const reactionsScore = user.reactions.reduce(
     (s, r) => s + REACTION_WEIGHT * r.delta * decay(now, r.timestamp),
     0,
   )
-  const rawScore = postsScore + reactionsScore
+  const rawScore = postsScore + mintsScore + reactionsScore
 
   // Attestation multiplier — if *any* recent post carried a
   // Telegram-verified low-anomaly claim, apply the trust boost. We
@@ -299,13 +365,15 @@ export function computeScore(user: UserRecord | null, now = Date.now()): TrustBr
 
   // 7-day rolling counts feed the leaderboard's weekly-heavy ranking.
   const weekAgo = now - WEEK_MS
-  const weeklyPosts = user.posts.filter((p) => p.timestamp >= weekAgo).length
+  const weeklyPosts = freePosts.filter((p) => p.timestamp >= weekAgo).length
+  const weeklyMints = mintPosts.filter((p) => p.timestamp >= weekAgo).length
   const weeklyReactions = user.reactions
     .filter((r) => r.timestamp >= weekAgo)
     .reduce((s, r) => s + Math.max(0, r.delta), 0)
 
   const weeklyRaw =
     weeklyReactions * REACTION_WEIGHT +
+    weeklyMints * MINT_WEIGHT +
     weeklyPosts * POST_WEIGHT
   const rankingScore =
     Math.round((weeklyRaw * 0.7 + score * 0.3) * multiplier * 10) / 10
@@ -314,11 +382,15 @@ export function computeScore(user: UserRecord | null, now = Date.now()): TrustBr
     score,
     tier: meta.tier,
     emoji: meta.emoji,
-    posts: user.posts.length,
+    posts: freePosts.length,
+    mints: mintPosts.length,
     reactionsTotal: user.reactions.reduce((s, r) => s + r.delta, 0),
+    hasMinted: true,
     postsScore: Math.round(postsScore * 10) / 10,
+    mintsScore: Math.round(mintsScore * 10) / 10,
     reactionsScore: Math.round(reactionsScore * 10) / 10,
     weeklyPosts,
+    weeklyMints,
     weeklyReactions,
     rankingScore,
   }

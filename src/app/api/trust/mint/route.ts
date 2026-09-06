@@ -41,7 +41,12 @@ function normaliseWallet(input: string): string {
 }
 
 export async function POST(request: Request) {
-  let body: { wallet?: string; messageId?: number; contentHashHex?: string }
+  let body: {
+    wallet?: string
+    messageId?: number
+    contentHashHex?: string
+    kind?: 'free' | 'mint'
+  }
   try {
     body = await request.json()
   } catch {
@@ -52,6 +57,12 @@ export async function POST(request: Request) {
   // contentHashHex is still accepted for API compatibility but no
   // longer drives an attestation bonus — the ×1.3 ATTESTATION_MULTIPLIER
   // in trustStore.computeScore already boosts any attested post.
+  //
+  // `kind` distinguishes a FREE hash-only post (weight 1, daily-capped)
+  // from a paid NFT MINT (weight 10, gates score+rewards). Defaults to
+  // 'free' for safety — a caller can't accidentally inflate score by
+  // omitting the field; the mint path must send 'mint' explicitly.
+  const kind: 'free' | 'mint' = body?.kind === 'mint' ? 'mint' : 'free'
   if (!rawWallet || typeof rawWallet !== 'string') {
     return NextResponse.json({ error: 'wallet is required' }, { status: 400 })
   }
@@ -77,18 +88,22 @@ export async function POST(request: Request) {
       await saveMessageRecord(msgRec)
     }
 
-    // Credit the wallet with a post event either way.
-    await appendPost(wallet, { messageId, timestamp: now })
+    // Credit the wallet with a post event, discriminated by kind so
+    // the scorer applies the right weight (free=1, mint=10) and the
+    // daily-cap only fires on 'free'.
+    await appendPost(wallet, { messageId, timestamp: now, kind })
 
-    // Contribute this mint's share (0.085 TON) to the current epoch's
-    // Reward Pool ledger. Best-effort — a KV blip mustn't undo the
-    // post credit above.
-    try { await creditMintToPool(messageId) } catch { /* ignore */ }
+    // Only paid mints contribute to the Reward Pool ledger — the pool
+    // is 100% funded by mint fees, so a free post must not increment it.
+    if (kind === 'mint') {
+      try { await creditMintToPool(messageId) } catch { /* ignore */ }
+    }
 
     return NextResponse.json({
       ok: true,
       wallet,
       messageId,
+      kind,
     })
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err)

@@ -2129,7 +2129,9 @@ export default function Home() {
     tier: 'Source' | 'Whistleblower' | 'Muckraker' | 'Investigative Reporter' | 'Truth-Teller'
     emoji: string
     posts: number
+    mints: number
     reactionsTotal: number
+    hasMinted: boolean
   } | null>(null);
   const [trustRefreshCount, setTrustRefreshCount] = useState(0);
   const [trustProfileOpen, setTrustProfileOpen] = useState(false);
@@ -2150,6 +2152,7 @@ export default function Home() {
       tier: TrustTierType
       emoji: string
       weeklyPosts: number
+      weeklyMints: number
       weeklyReactions: number
       payoutShare: number
       payoutTon: number
@@ -3391,7 +3394,9 @@ export default function Home() {
             tier: j.tier,
             emoji: j.emoji ?? '🕯',
             posts: j.posts,
+            mints: j.mints ?? 0,
             reactionsTotal: j.reactionsTotal,
+            hasMinted: j.hasMinted ?? false,
           })
         }
       } catch { /* offline / cold KV — leave as null */ }
@@ -3685,6 +3690,9 @@ export default function Home() {
               wallet: tonWallet.account.address,
               messageId: Number.isFinite(trustMsgId) && trustMsgId > 0 ? trustMsgId : 0,
               contentHashHex,
+              // Paid NFT mint path — MUST be explicit so the API
+              // weights it ×10 and lifts the score-gate for this wallet.
+              kind: 'mint',
             }),
           })
             .then(() => setTrustRefreshCount((n) => n + 1))
@@ -4027,6 +4035,10 @@ export default function Home() {
               wallet: tonWallet.account.address,
               messageId,
               contentHashHex: normalisedHash,
+              // Free hash-only channel post — weight 1, daily-capped.
+              // Does NOT lift the score-gate; wallet still needs a paid
+              // mint before this credit becomes visible.
+              kind: 'free',
             }),
           })
             .then(() => setTrustRefreshCount((n) => n + 1))
@@ -5284,9 +5296,11 @@ export default function Home() {
                           {isMe && <span style={{ color: '#ffd700', marginLeft: 8, fontWeight: 800 }}>(YOU)</span>}
                         </div>
                         <div style={{ fontSize: 12, color: '#bbb', marginTop: 4, fontFamily: 'monospace' }}>
-                          <span style={{ color: '#e0e0e0' }}>{row.weeklyPosts}p</span>
+                          <span style={{ color: '#ffd700' }}>{row.weeklyMints}m</span>
                           {' · '}
                           <span style={{ color: '#e0e0e0' }}>{row.weeklyReactions}r</span>
+                          {' · '}
+                          <span style={{ color: '#aaa' }}>{row.weeklyPosts}p</span>
                         </div>
                       </div>
                       <div style={{ textAlign: 'right' }}>
@@ -5318,7 +5332,7 @@ export default function Home() {
               }}>
                 <div style={{ marginBottom: 4 }}>
                   <span style={{ color: '#e0e0e0', fontWeight: 700 }}>Ranking:</span>{' '}
-                  weekly (reactions×5 + posts×1) × 70% + all-time Trust × 30%.
+                  weekly (mints×10 + reactions×5 + posts×1) × 70% + all-time Trust × 30%.
                 </div>
                 <div>
                   <span style={{ color: '#e0e0e0', fontWeight: 700 }}>Payout:</span>{' '}
@@ -5421,14 +5435,35 @@ export default function Home() {
                 )}
               </div>
               <div style={{ padding: '20px 24px calc(env(safe-area-inset-bottom, 0px) + 24px)', flexShrink: 0 }}>
+                {/* Locked banner when the wallet hasn't minted yet —
+                    events are still recorded so nothing is lost, but
+                    score/tier/payout are all gated behind the first mint. */}
+                {trustScore && !trustScore.hasMinted && (
+                  <div style={{
+                    background: 'rgba(255,207,92,0.12)',
+                    border: '1px solid rgba(255,207,92,0.4)',
+                    borderRadius: 12,
+                    padding: '14px 16px',
+                    marginBottom: 14,
+                    fontSize: 14,
+                    lineHeight: 1.5,
+                    color: '#ffcf5c',
+                    fontWeight: 700,
+                  }}>
+                    🔒 Mint 1 NFT to unlock Trust Score, tier badge, and
+                    the weekly payout. Your posts + reactions ARE being
+                    recorded — they retro-credit the moment you mint.
+                  </div>
+                )}
                 <div style={{
                   display: 'grid',
-                  gridTemplateColumns: 'repeat(2, 1fr)',
+                  gridTemplateColumns: 'repeat(3, 1fr)',
                   gap: 10,
                   marginBottom: 18,
                 }}>
                   {[
                     { label: 'POSTS',     value: trustScore?.posts ?? 0,          weight: 1 },
+                    { label: 'MINTS',     value: trustScore?.mints ?? 0,          weight: 10 },
                     { label: 'REACTIONS', value: trustScore?.reactionsTotal ?? 0, weight: 5 },
                   ].map((it) => (
                     <div key={it.label} style={{
@@ -5459,15 +5494,16 @@ export default function Home() {
                   borderRadius: 10,
                   fontWeight: 600,
                 }}>
-                  Score = posts × 1 + reactions × 5, with time decay.
-                  Older activity loses weight; recent engagement drives your tier.
+                  Score = posts × 1 + mints × 10 + reactions × 5, with
+                  time decay. Requires ≥1 mint to unlock — free posts
+                  alone won't accrue.
                   <div style={{ marginTop: 10, display: 'grid', gap: 6 }}>
                     {([
-                      { tier: 'Source' as const,                 range: '0–49',       col: '#8b8b8b' },
-                      { tier: 'Whistleblower' as const,          range: '50–199',     col: '#4dd4ff' },
-                      { tier: 'Muckraker' as const,              range: '200–999',    col: '#ffcf5c' },
-                      { tier: 'Investigative Reporter' as const, range: '1000–4999',  col: '#ff7a4d' },
-                      { tier: 'Truth-Teller' as const,           range: '5000+',      col: '#00ff87' },
+                      { tier: 'Source' as const,                 range: '0–99',       col: '#8b8b8b' },
+                      { tier: 'Whistleblower' as const,          range: '100–499',    col: '#4dd4ff' },
+                      { tier: 'Muckraker' as const,              range: '500–2499',   col: '#ffcf5c' },
+                      { tier: 'Investigative Reporter' as const, range: '2500–9999',  col: '#ff7a4d' },
+                      { tier: 'Truth-Teller' as const,           range: '10000+',     col: '#00ff87' },
                     ]).map((t) => {
                       const isCurrent = trustScore?.tier === t.tier
                       return (
