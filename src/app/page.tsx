@@ -2935,13 +2935,30 @@ export default function Home() {
           nftC.height = NFT_EDGE;
           const nftCtx = nftC.getContext('2d');
           if (nftCtx) {
-            // Cover-crop the shorter dimension of the sensor frame
-            // into the square canvas so the widest / tallest area
-            // is trimmed evenly on both sides.
-            let sx = 0, sy = 0, sw = vw, sh = vh;
-            if (vw > vh) { sw = vh; sx = (vw - vh) / 2; }
-            else if (vh > vw) { sh = vw; sy = (vh - vw) / 2; }
-            nftCtx.drawImage(v, sx, sy, sw, sh, 0, 0, NFT_EDGE, NFT_EDGE);
+            // Match the preview FOV: the on-screen video reads sensor
+            // pixels through object-fit:cover *plus* an optional CSS
+            // transform:scale(displayScale). If we ignored those and
+            // just cover-cropped the raw sensor to a square (the old
+            // behaviour) the NFT would show a WIDER angle than the
+            // guide box the user framed against — noticeably wrong
+            // once they compare capture vs preview side-by-side.
+            //
+            // The square guide occupies a `Vw × Vw` box centered in
+            // the video element. Back-projecting that through the two
+            // scales gives the exact sensor rectangle to sample.
+            const rectV = v.getBoundingClientRect();
+            const Vw = rectV.width || vw;
+            const Vh = rectV.height || vh;
+            const baseScale = Math.max(Vw / vw, Vh / vh);
+            const totalScale = baseScale * displayScale;
+            const sideRaw = Vw / totalScale;
+            // Guard: if displayScale is very small the computed side
+            // could overshoot the sensor. Clamp to the shorter sensor
+            // dimension so we never read outside the frame.
+            const side = Math.min(sideRaw, vw, vh);
+            const sx = (vw - side) / 2;
+            const sy = (vh - side) / 2;
+            nftCtx.drawImage(v, sx, sy, side, side, 0, 0, NFT_EDGE, NFT_EDGE);
             if (crtMode) drawCrtOverlay(nftCtx, NFT_EDGE, NFT_EDGE);
             drawZkTruthWatermark(nftCtx, NFT_EDGE, NFT_EDGE, wordmarkRef.current);
             drawZkTruthOverlays(nftCtx, NFT_EDGE, NFT_EDGE, { timeStr, gps, hash });
@@ -3080,23 +3097,33 @@ export default function Home() {
       // paint the proof-of-capture badges on top so the resulting
       // MP4 (which is also what gets posted to the Telegram channel)
       // carries the same overlays as photo captures.
+      // Snapshot the on-screen video element size ONCE at record
+      // start. We need it to back-project the on-screen 1:1 NFT guide
+      // to sensor coordinates so the recorded frame captures the
+      // same FOV the user was framing against. Recomputing per frame
+      // would be wasteful (rectV doesn't change during a recording)
+      // and could drift if a layout thrash mid-record briefly returned
+      // a stale rect.
+      const rectV = v.getBoundingClientRect();
+      const Vw = rectV.width || pw;
+      const Vh = rectV.height || ph;
+
       const drawFrame = () => {
         const vw = v.videoWidth || 1080;
         const vh = v.videoHeight || 1920;
-        const vr = vw / vh;
-        const cr = pw / ph;
-        let sx = 0, sy = 0, sw = vw, sh = vh;
-        if (vr > cr) { sw = vh * cr; sx = (vw - sw) / 2; }
-        else { sh = vw / cr; sy = (vh - sh) / 2; }
-
-        // Match the preview's displayScale zoom so a pinch/2x preview
-        // is reflected in the saved video too.
-        const z = displayScale;
-        if (z > 1) {
-          const zw = sw / z, zh = sh / z;
-          sx += (sw - zw) / 2; sy += (sh - zh) / 2;
-          sw = zw; sh = zh;
-        }
+        // Same viewport-aware sensor crop as the photo capture path
+        // (see handleCapture) — object-fit:cover baseScale times the
+        // CSS transform:scale(displayScale) gives the total mapping
+        // from sensor pixels to on-screen pixels. Back-project the
+        // Vw × Vw guide box through that to get the sensor square.
+        const baseScale = Math.max(Vw / vw, Vh / vh);
+        const totalScale = baseScale * displayScale;
+        const sideRaw = Vw / totalScale;
+        const side = Math.min(sideRaw, vw, vh);
+        const sx = (vw - side) / 2;
+        const sy = (vh - side) / 2;
+        const sw = side;
+        const sh = side;
 
         ctx.save();
         if (facingMode === 'user') {
