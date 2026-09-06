@@ -1000,8 +1000,77 @@ canvas { display: none; }
   position: absolute;
   top: 0; left: 0;
   width: 100%; height: 100%;
-  object-fit: cover;
+  /* Captures are 1:1 square now — contain centers the square and
+     letterboxes the vertical space with black bars, matching what
+     wallet galleries do. cover would silently crop the square
+     back to a portrait and defeat the whole point. */
+  object-fit: contain;
   background: #000;
+}
+/* ---- Square NFT crop guide (camera viewfinder overlay) ---- */
+/* Frames the centered 1:1 area of the portrait viewfinder so the
+   user knows exactly what pixels will become the NFT. Positioned
+   with viewport-relative units so the square is always min(100vw,
+   fullHeight) wide, centered vertically. Pointer-events disabled
+   throughout so the guide never blocks camera controls underneath. */
+.nft-square-guide {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 5;
+}
+.nsg-mask {
+  position: absolute;
+  left: 0; right: 0;
+  background: rgba(0, 0, 0, 0.42);
+  backdrop-filter: blur(0.5px);
+}
+.nsg-mask-top {
+  top: 0;
+  height: calc((100% - 100vw) / 2);
+}
+.nsg-mask-bottom {
+  bottom: 0;
+  height: calc((100% - 100vw) / 2);
+}
+.nsg-frame {
+  position: absolute;
+  left: 0; right: 0;
+  top: calc((100% - 100vw) / 2);
+  height: 100vw;
+  max-height: 100%;
+  border: 1px solid rgba(255, 255, 255, 0.75);
+  box-shadow:
+    0 0 0 1px rgba(0, 0, 0, 0.35),
+    inset 0 0 0 1px rgba(0, 0, 0, 0.35);
+}
+.nsg-corner {
+  position: absolute;
+  width: 22px;
+  height: 22px;
+  border-color: #ffffff;
+  border-style: solid;
+  border-width: 0;
+  filter: drop-shadow(0 0 3px rgba(0, 0, 0, 0.6));
+}
+.nsg-tl { top: -1px; left: -1px; border-top-width: 3px; border-left-width: 3px; }
+.nsg-tr { top: -1px; right: -1px; border-top-width: 3px; border-right-width: 3px; }
+.nsg-bl { bottom: -1px; left: -1px; border-bottom-width: 3px; border-left-width: 3px; }
+.nsg-br { bottom: -1px; right: -1px; border-bottom-width: 3px; border-right-width: 3px; }
+.nsg-label {
+  position: absolute;
+  bottom: 8px;
+  left: 50%;
+  transform: translateX(-50%);
+  font-family: monospace;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 1.5px;
+  color: rgba(255, 255, 255, 0.85);
+  background: rgba(0, 0, 0, 0.55);
+  padding: 3px 8px;
+  border-radius: 4px;
+  text-shadow: 0 1px 1px rgba(0, 0, 0, 0.6);
 }
 .wid-overlay {
   position: absolute;
@@ -2852,194 +2921,48 @@ export default function Home() {
           hash = await computeSHA256(rawData);
         }
 
-        // ---- NFT-facing capture ----
-        // Snapshot the preview element's displayed aspect ratio and
-        // build a canvas of the same shape at a decent resolution.
-        // Then cover-crop the source stream into it. Because both the
-        // preview <video> and this canvas cover-crop the same source
-        // to the same aspect, the pixels we save are the pixels the
-        // user was looking at when they tapped shoot.
+        // ---- NFT-facing capture (SQUARE 1:1) ----
+        // The wallet tiles that show NFTs are square, and portrait
+        // captures used to letterbox awkwardly next to other people's
+        // square art. We now center-crop the source stream into a
+        // 1080×1080 canvas — this same square is used for both the
+        // NFT upload AND the preview / Telegram share, so everything
+        // downstream stays visually consistent with a wallet gallery.
         try {
-          const rect = v.getBoundingClientRect();
-          const previewAspect =
-            rect.width > 0 && rect.height > 0
-              ? rect.width / rect.height
-              : window.innerWidth / Math.max(1, window.innerHeight);
-          // 1080 px on the short edge is plenty for wallet tiles and
-          // keeps upload sizes manageable.
-          const shortEdge = 1080;
-          const nw = previewAspect < 1
-            ? shortEdge
-            : Math.round(shortEdge * previewAspect);
-          const nh = previewAspect < 1
-            ? Math.round(shortEdge / previewAspect)
-            : shortEdge;
+          const NFT_EDGE = 1080;
           const nftC = document.createElement('canvas');
-          nftC.width = nw;
-          nftC.height = nh;
+          nftC.width = NFT_EDGE;
+          nftC.height = NFT_EDGE;
           const nftCtx = nftC.getContext('2d');
           if (nftCtx) {
-            const vr = vw / vh;
-            const cr = nw / nh;
+            // Cover-crop the shorter dimension of the sensor frame
+            // into the square canvas so the widest / tallest area
+            // is trimmed evenly on both sides.
             let sx = 0, sy = 0, sw = vw, sh = vh;
-            if (vr > cr) { sw = vh * cr; sx = (vw - sw) / 2; }
-            else { sh = vw / cr; sy = (vh - sh) / 2; }
-            nftCtx.drawImage(v, sx, sy, sw, sh, 0, 0, nw, nh);
-            // Optional CRT / broadcast-noise stylisation — sits under
-            // the proof badges so metadata text stays legible.
-            if (crtMode) drawCrtOverlay(nftCtx, nw, nh);
-            // Semi-transparent zkTruth wordmark at frame center.
-            drawZkTruthWatermark(nftCtx, nw, nh, wordmarkRef.current);
-            // Bake the proof-of-capture badges directly onto the NFT
-            // frame so anyone browsing the wallet sees the timestamp,
-            // GPS coordinates, chain marker, and hash without having
-            // to open the metadata JSON. Positions/sizes scale with
-            // the canvas so the layout stays balanced regardless of
-            // the preview aspect ratio we snapshotted.
-            drawZkTruthOverlays(nftCtx, nw, nh, { timeStr, gps, hash });
+            if (vw > vh) { sw = vh; sx = (vw - vh) / 2; }
+            else if (vh > vw) { sh = vw; sy = (vh - vw) / 2; }
+            nftCtx.drawImage(v, sx, sy, sw, sh, 0, 0, NFT_EDGE, NFT_EDGE);
+            if (crtMode) drawCrtOverlay(nftCtx, NFT_EDGE, NFT_EDGE);
+            drawZkTruthWatermark(nftCtx, NFT_EDGE, NFT_EDGE, wordmarkRef.current);
+            drawZkTruthOverlays(nftCtx, NFT_EDGE, NFT_EDGE, { timeStr, gps, hash });
             rawImage = nftC.toDataURL('image/jpeg', 0.9);
+            // Unify: capturedImage (used by preview + Telegram post)
+            // becomes the SAME square. This drops the old branded
+            // 9:16 share card in favour of one square that reads
+            // consistently everywhere.
+            finalImage = rawImage;
           }
         } catch {
-          // If anything above trips, we simply leave rawImage null and
-          // fall back to `capturedImage` (branded 9:16) at mint time.
+          // If anything above trips, we leave rawImage null and fall
+          // back to the (possibly-still-null) branded card below.
         }
 
         // Create portrait (9:16) canvas with watermark
-        const pw = 1080, ph = 1920;
-        const shareC = document.createElement('canvas');
-        shareC.width = pw; shareC.height = ph;
-        const ctx = shareC.getContext('2d');
-        if (ctx) {
-          // Black background
-          ctx.fillStyle = '#000';
-          ctx.fillRect(0, 0, pw, ph);
-
-          // Draw video in cover mode (fill entire portrait canvas)
-          const vr = vw / vh;
-          const cr = pw / ph;
-          let sx = 0, sy = 0, sw = vw, sh = vh;
-          if (vr > cr) { sw = vh * cr; sx = (vw - sw) / 2; }
-          else { sh = vw / cr; sy = (vh - sh) / 2; }
-          ctx.drawImage(v, sx, sy, sw, sh, 0, 0, pw, ph);
-          if (crtMode) drawCrtOverlay(ctx, pw, ph);
-          drawZkTruthWatermark(ctx, pw, ph, wordmarkRef.current);
-
-          // Helper: draw rounded rect (Safari-safe, no roundRect)
-          function drawPill(c: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, r: number) {
-            c.beginPath();
-            c.moveTo(x + r, y);
-            c.lineTo(x + w - r, y);
-            c.arcTo(x + w, y, x + w, y + r, r);
-            c.lineTo(x + w, y + h - r);
-            c.arcTo(x + w, y + h, x + w - r, y + h, r);
-            c.lineTo(x + r, y + h);
-            c.arcTo(x, y + h, x, y + h - r, r);
-            c.lineTo(x, y + r);
-            c.arcTo(x, y, x + r, y, r);
-            c.closePath();
-          }
-
-          // ===== TOP BAR: Logo + LIVE + WORLD CHAIN =====
-          const padL = 44;
-          const topY = 100;
-
-          // Semi-transparent gradient at top
-          const topGrad = ctx.createLinearGradient(0, 0, 0, 260);
-          topGrad.addColorStop(0, 'rgba(0,0,0,0.7)');
-          topGrad.addColorStop(1, 'transparent');
-          ctx.fillStyle = topGrad;
-          ctx.fillRect(0, 0, pw, 260);
-
-          // Chat bubble icon (simplified)
-          ctx.globalAlpha = 1.0;
-          ctx.strokeStyle = '#ffffff';
-          ctx.lineWidth = 3;
-          ctx.lineCap = 'round';
-          ctx.lineJoin = 'round';
-          ctx.beginPath();
-          ctx.moveTo(padL + 28, 94);
-          ctx.lineTo(padL + 28, 74);
-          ctx.arcTo(padL + 28, 66, padL + 20, 66, 4);
-          ctx.lineTo(padL + 4, 66);
-          ctx.arcTo(padL, 66, padL, 70, 4);
-          ctx.lineTo(padL, 90);
-          ctx.arcTo(padL, 94, padL + 4, 94, 4);
-          ctx.lineTo(padL + 4, 94);
-          ctx.lineTo(padL, 100);
-          ctx.lineTo(padL + 10, 94);
-          ctx.lineTo(padL + 24, 94);
-          ctx.arcTo(padL + 28, 94, padL + 28, 90, 4);
-          ctx.stroke();
-          // Check mark inside bubble
-          ctx.strokeStyle = '#00c864';
-          ctx.lineWidth = 3.5;
-          ctx.beginPath();
-          ctx.moveTo(padL + 8, 80);
-          ctx.lineTo(padL + 12, 84);
-          ctx.lineTo(padL + 20, 76);
-          ctx.stroke();
-
-          // "zkTruth" text
-          ctx.globalAlpha = 1.0;
-          ctx.font = 'italic 32px sans-serif';
-          ctx.fillStyle = 'rgba(255,255,255,0.75)';
-          const zkW = ctx.measureText('zk').width;
-          ctx.fillText('zk', padL + 36, topY);
-          ctx.font = 'italic bold 32px sans-serif';
-          ctx.fillStyle = '#ffffff';
-          ctx.fillText('Truth', padL + 36 + zkW, topY);
-          const truthEnd = padL + 36 + zkW + ctx.measureText('Truth').width + 12;
-
-          // LIVE badge (red pill)
-          const liveX = truthEnd + 8;
-          const liveY = topY - 18;
-          const liveW = 72;
-          const liveH = 28;
-          ctx.fillStyle = '#ff3b5c';
-          drawPill(ctx, liveX, liveY, liveW, liveH, 14);
-          ctx.fill();
-          // Live dot
-          ctx.fillStyle = '#ffffff';
-          ctx.beginPath();
-          ctx.arc(liveX + 14, liveY + 14, 4, 0, Math.PI * 2);
-          ctx.fill();
-          // LIVE text
-          ctx.font = 'bold 14px monospace';
-          ctx.fillStyle = '#ffffff';
-          ctx.fillText('LIVE', liveX + 24, liveY + 19);
-
-          // WORLD CHAIN badge (top right)
-          const chainText = 'WORLD CHAIN';
-          ctx.font = '14px monospace';
-          const chainW = ctx.measureText(chainText).width + 24;
-          const chainX = pw - padL - chainW;
-          const chainY = liveY;
-          ctx.strokeStyle = 'rgba(0,200,255,0.5)';
-          ctx.lineWidth = 1.5;
-          drawPill(ctx, chainX, chainY, chainW, liveH, 14);
-          ctx.stroke();
-          ctx.fillStyle = 'rgba(0,200,255,0.1)';
-          drawPill(ctx, chainX, chainY, chainW, liveH, 14);
-          ctx.fill();
-          ctx.fillStyle = '#00c8ff';
-          ctx.fillText(chainText, chainX + 12, chainY + 19);
-
-          // ===== METADATA TEXT =====
-          const accentGreen = '#00ff87';
-          const fontSize = 22;
-          const lineGap = 36;
-          const startY = 170;
-
-          ctx.font = fontSize + 'px monospace';
-          ctx.fillStyle = accentGreen;
-          ctx.globalAlpha = 0.6;
-          ctx.fillText('⏱ ' + timeStr, padL, startY);
-          ctx.fillText('📍 ' + gps, padL, startY + lineGap);
-          ctx.fillText('⛓ WORLD CHAIN READY', padL, startY + lineGap * 2);
-          ctx.fillText('🔒 SHA-256: ' + hash.slice(0, 18) + '...', padL, startY + lineGap * 3);
-          ctx.globalAlpha = 1.0;
-          finalImage = shareC.toDataURL('image/jpeg', 0.92);
-        }
+        // Legacy branded 9:16 share card removed 2026-09 — the square
+        // rawImage above now serves as both the NFT payload and the
+        // Telegram share tile, so we no longer generate a separate
+        // portrait card. Keeps the flow simpler and prevents wallet
+        // tiles from looking off-shape next to other square NFTs.
       }
 
       // Stash the raw frame in a ref so handleConfirmTx can upload it
@@ -3116,24 +3039,13 @@ export default function Home() {
       setCapturedVideo(null);
 
       const v = videoRef.current;
-      // Match the recording canvas to the PREVIEW element's aspect
-      // ratio so the saved clip frames the exact pixels the user was
-      // looking at while filming. Snapshotting once (rather than
-      // reading each drawFrame tick) avoids confusing MediaRecorder /
-      // the MP4 hardware encoder mid-stream — canvas dimensions must
-      // stay fixed for the life of the recording.
-      const rectV = v.getBoundingClientRect();
-      const previewAspect =
-        rectV.width > 0 && rectV.height > 0
-          ? rectV.width / rectV.height
-          : 9 / 16;
-      const shortEdge = 1080;
-      const pw = previewAspect < 1
-        ? shortEdge
-        : Math.round(shortEdge * previewAspect);
-      const ph = previewAspect < 1
-        ? Math.round(shortEdge / previewAspect)
-        : shortEdge;
+      // Square (1:1) recording canvas — matches the on-screen square
+      // guide overlay so what the user framed inside the guide is
+      // exactly what lands in the NFT + Telegram post. Portrait
+      // recording used to leave the wallet tile letterboxed against
+      // other square NFTs.
+      const pw = 1080;
+      const ph = 1080;
 
       // Create / reuse the offscreen canvas we draw into.
       if (!recCanvasRef.current) {
@@ -4480,6 +4392,29 @@ export default function Home() {
               </div>
             )}
             <canvas ref={canvasRef} style={{display:'none'}} />
+
+            {/*
+              Square NFT crop guide. The whole camera surface stays
+              full-portrait so the user still gets a big preview, but
+              only the centred 1:1 square inside this overlay actually
+              becomes the NFT / Telegram post. We dim the letterbox
+              strips above and below the square, then draw a thin
+              white border + four corner ticks so the crop window
+              reads at a glance.
+            */}
+            {cameraReady && (
+              <div className="nft-square-guide" aria-hidden="true">
+                <div className="nsg-mask nsg-mask-top" />
+                <div className="nsg-mask nsg-mask-bottom" />
+                <div className="nsg-frame">
+                  <span className="nsg-corner nsg-tl" />
+                  <span className="nsg-corner nsg-tr" />
+                  <span className="nsg-corner nsg-bl" />
+                  <span className="nsg-corner nsg-br" />
+                  <span className="nsg-label">NFT · 1:1</span>
+                </div>
+              </div>
+            )}
 
             <div className="meta-overlay">
               <div className="meta-line">⏱ {now.replace('T',' ').split('.')[0]} UTC</div>
