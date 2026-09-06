@@ -2023,6 +2023,48 @@ async function probeVideoMeta(video: Blob): Promise<{ width: number; height: num
   }
 }
 
+/**
+ * Kicks off a background Vercel Blob upload for a freshly-captured
+ * media file. Returned promise resolves when the upload is done — the
+ * mint handler awaits it instead of running its own sync upload, so
+ * on slow cellular connections the wallet popup opens near-instantly
+ * because the 20-50 MB video was already uploading while the user
+ * reviewed the confirm screen.
+ *
+ * Preheat runs OUTSIDE the mint critical path — errors here are
+ * logged and re-thrown so the mint handler can fall back to a fresh
+ * sync upload (which surfaces UX errors properly).
+ */
+async function preheatUploadMedia(
+  hash: string,
+  mediaBlob: Blob,
+  ext: string,
+): Promise<void> {
+  const pathname = `captures/${hash}.${ext}`
+  await upload(pathname, mediaBlob, {
+    access: 'public',
+    handleUploadUrl: '/api/upload/token',
+    contentType: mediaBlob.type || undefined,
+  })
+}
+
+async function preheatUploadPoster(
+  hash: string,
+  videoBlob: Blob,
+): Promise<void> {
+  const posterBlob = await extractFirstFrameJpeg(videoBlob, {
+    timeStr: '',
+    gps: '',
+    hash,
+  })
+  if (!posterBlob) return
+  await upload(`captures/${hash}.jpg`, posterBlob, {
+    access: 'public',
+    handleUploadUrl: '/api/upload/token',
+    contentType: 'image/jpeg',
+  })
+}
+
 async function extractFirstFrameJpeg(
   video: Blob,
   overlay?: { timeStr: string; gps: string; hash: string },
@@ -2395,6 +2437,35 @@ export default function Home() {
   // it in a ref rather than state because the mint flow reads it once
   // at click-time and doesn't need to trigger re-renders.
   const rawImageForNftRef = useRef<string | null>(null);
+  // Background upload preheater. As soon as a capture finishes, the
+  // capture handler kicks off the Blob upload here so it runs in
+  // parallel with the user reviewing the confirm screen. When they
+  // finally hit MINT, handleConfirmTx awaits this promise instead of
+  // starting a fresh upload — huge win on slow cellular where the
+  // upload used to sit on the wallet-open critical path.
+  const preheatUploadRef = useRef<{
+    hash: string
+    mediaPromise: Promise<void>
+    posterPromise: Promise<void> | null
+  } | null>(null);
+  const kickPreheatUpload = useCallback((
+    hash: string,
+    mediaBlob: Blob,
+    ext: string,
+  ) => {
+    if (preheatUploadRef.current?.hash === hash) return
+    const isVideo = /^video\//i.test(mediaBlob.type)
+    const mediaPromise = preheatUploadMedia(hash, mediaBlob, ext)
+    // Silence unhandled-rejection console noise; the mint handler
+    // catches errors when it awaits the promise.
+    mediaPromise.catch((err) => console.warn('[preheat] media', err))
+    const posterPromise = isVideo
+      ? preheatUploadPoster(hash, mediaBlob).catch((err) => {
+          console.warn('[preheat] poster', err)
+        })
+      : null
+    preheatUploadRef.current = { hash, mediaPromise, posterPromise }
+  }, []);
   // AudioContext lives only for the duration of a single recording so it
   // doesn't leak resources or hold the mic open longer than needed.
   const audioCtxRef = useRef<AudioContext | null>(null);
@@ -2976,6 +3047,27 @@ export default function Home() {
       // finalImage that we use for Telegram sharing).
       rawImageForNftRef.current = rawImage;
 
+      // Kick the Blob upload in the background NOW so it's mostly done
+      // by the time the user hits MINT. Convert the data URL to a Blob
+      // once here — the sync mint path also decodes it, but preheat
+      // beats it to the punch on cellular.
+      try {
+        const normHash = normaliseHashHex(hash)
+        const rawForPreheat = rawImage
+        if (normHash && rawForPreheat && rawForPreheat.startsWith('data:')) {
+          const commaIdx = rawForPreheat.indexOf(',')
+          const mime = /data:([^;]+)/.exec(rawForPreheat.slice(0, commaIdx))?.[1] || 'image/jpeg'
+          const bin = atob(rawForPreheat.slice(commaIdx + 1))
+          const bytes = new Uint8Array(bin.length)
+          for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i)
+          const photoBlob = new Blob([bytes], { type: mime })
+          const ext = mime === 'image/png' ? 'png' : 'jpg'
+          kickPreheatUpload(normHash, photoBlob, ext)
+        }
+      } catch (e) {
+        console.warn('[preheat] photo kick failed', e)
+      }
+
       const proof = { timestamp: ts, hash, gps, device: 'Device', chain: 'World Chain', tokenId: Math.floor(Math.random() * 999999) + 1 };
       setTimeout(() => {
         setCapturedImage(finalImage); setProofData(proof); setMintStep(0); setMintComplete(false);
@@ -3256,6 +3348,26 @@ export default function Home() {
           };
           setCapturedImage(null); setProofData(proof); setMintStep(0); setMintComplete(false);
           setWorldIdVerified(false); setWorldIdVerifying(false); setScreen("worldid");
+
+          // Kick the Blob upload in the background so it's mostly done
+          // by the time the user hits MINT. Also runs the video →
+          // poster extraction + poster upload in parallel so the NFT
+          // metadata endpoint has BOTH the .mp4 and .jpg ready.
+          try {
+            const normHash = normaliseHashHex(proof.hash)
+            if (normHash) {
+              const cleanType = (blob.type || 'video/mp4').split(';')[0].trim() || 'video/mp4'
+              const cleaned = cleanType === blob.type
+                ? blob
+                : new Blob([blob], { type: cleanType })
+              const ext = /mp4/i.test(cleanType) ? 'mp4'
+                : /webm/i.test(cleanType) ? 'webm'
+                : 'bin'
+              kickPreheatUpload(normHash, cleaned, ext)
+            }
+          } catch (e) {
+            console.warn('[preheat] video kick failed', e)
+          }
         };
         mediaRecorderRef.current = recorder;
         // Don't pass a timeslice — iOS Safari has been observed to emit
@@ -3290,7 +3402,7 @@ export default function Home() {
   const formatTime = (s: number) => `${String(Math.floor(s/60)).padStart(2,'0')}:${String(s%60).padStart(2,'0')}`;
 
   const handleReset = useCallback(() => {
-    setScreen("camera"); setMintComplete(false); setCapturedImage(null); setCapturedVideo(null); setProofData(null); rawImageForNftRef.current = null;
+    setScreen("camera"); setMintComplete(false); setCapturedImage(null); setCapturedVideo(null); setProofData(null); rawImageForNftRef.current = null; preheatUploadRef.current = null;
     setTxHash(null); setRecording(false); setWorldIdVerified(false); setWorldIdVerifying(false);
     setWorldIdNullifier(null); setMintMode("verified");
     // Reset → drop both persisted entries (flow snapshot + signed
@@ -3491,8 +3603,35 @@ export default function Home() {
     //    same hash. We deliberately BLOCK the mint on this — a Proof
     //    NFT with no media is worse than no NFT at all, and the mint
     //    fee is non-refundable.
-    //
-    // Two capture paths converge here:
+
+    // FAST PATH — the capture handler already kicked off the upload in
+    // the background (see kickPreheatUpload). On slow cellular the
+    // 20-50 MB video used to sit on the wallet-open critical path,
+    // making MINT feel unresponsive. Preheat runs it in parallel with
+    // the user reviewing the confirm screen so we usually just await
+    // a finished promise here.
+    let preheatOk = false
+    if (preheatUploadRef.current?.hash === contentHashHex) {
+      setShareStatus('FINALIZING UPLOAD...')
+      try {
+        await preheatUploadRef.current.mediaPromise
+        // Poster is best-effort — a failure just means the wallet tile
+        // falls back to the logo. Don't block the mint on it.
+        if (preheatUploadRef.current.posterPromise) {
+          await preheatUploadRef.current.posterPromise.catch(() => {})
+        }
+        preheatOk = true
+        setShareStatus('READY')
+      } catch (e) {
+        // Preheat failed (network flapped, etc.). Fall through to the
+        // synchronous upload path below — it retries with user-visible
+        // error surfacing.
+        console.warn('[mint] preheat upload failed, falling back to sync', e)
+        preheatUploadRef.current = null
+      }
+    }
+
+    // Two capture paths converge here (only reached if preheat missed):
     //   - PHOTO   : `capturedImage` is a `data:` URL (base64)
     //   - VIDEO   : `capturedVideo` is a raw `Blob` produced by
     //               MediaRecorder (webm or mp4)
@@ -3538,7 +3677,10 @@ export default function Home() {
       uploadName = `capture.${ext}`
     }
 
-    if (uploadBlob) {
+    if (preheatOk) {
+      // Preheat already put the media (and poster for videos) in Blob
+      // storage. Nothing to do here — proceed straight to mint tx.
+    } else if (uploadBlob) {
       setShareStatus('UPLOADING CAPTURE TO STORAGE...')
       try {
         // Derive the extension from the filename we picked above so
@@ -3603,8 +3745,9 @@ export default function Home() {
         setTimeout(() => setShareStatus(''), 10000)
         return
       }
-    } else {
-      // No media at all — bail rather than mint a blank NFT.
+    } else if (!preheatOk) {
+      // No preheat AND no sync upload path — bail rather than mint a
+      // blank NFT.
       setMinting(false)
       setShareStatus('No capture to mint — retake the photo/video first')
       setTimeout(() => setShareStatus(''), 5000)

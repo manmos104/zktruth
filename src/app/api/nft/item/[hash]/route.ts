@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server'
-import { head } from '@vercel/blob'
+import { head, list } from '@vercel/blob'
 import { getRedis } from '@/lib/trustStore'
 
 /**
@@ -64,9 +64,29 @@ async function resolveMedia(hash: string): Promise<ResolvedMedia> {
     tryHead(`captures/${hash}.mp4`, token),
     tryHead(`captures/${hash}.webm`, token),
   ])
-  const image = jpgUrl || pngUrl || FALLBACK_IMAGE
-  const video = mp4Url || webmUrl
-  return video ? { image, animation_url: video } : { image }
+  let image = jpgUrl || pngUrl
+  let video = mp4Url || webmUrl
+
+  // Fallback #1 — list every blob under the hash prefix. Catches an
+  // extension the strict head() probes miss (`.jpeg`, `.mov`, an
+  // uppercase suffix that survived somewhere, or a stray suffix from
+  // an older client). Without this we return the logo tile whenever a
+  // capture landed under a non-canonical name, which is exactly the
+  // "wallet shows fallback logo again" symptom.
+  if (!image || !video) {
+    try {
+      const listing = await list({ prefix: `captures/${hash}`, token })
+      for (const b of listing.blobs) {
+        const p = b.pathname.toLowerCase()
+        if (!image && /\.(jpe?g|png|webp|gif)$/.test(p)) image = b.url
+        if (!video && /\.(mp4|webm|mov|m4v)$/.test(p))  video = b.url
+      }
+    } catch { /* listing is a bonus — don't fail the request over it */ }
+  }
+
+  const resolved: ResolvedMedia = { image: image ?? FALLBACK_IMAGE }
+  if (video) resolved.animation_url = video
+  return resolved
 }
 
 export async function GET(
