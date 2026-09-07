@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server'
-import { head, list } from '@vercel/blob'
 import { getRedis } from '@/lib/trustStore'
+import { resolveCaptureMedia } from '@/lib/mediaResolver'
 
 /**
  * Dynamic TEP-64 offchain metadata for a zkTruth Proof NFT.
@@ -39,53 +39,14 @@ function shortHash(hash: string): string {
   return hash.length > 10 ? `${hash.slice(0, 6)}…${hash.slice(-4)}` : hash
 }
 
-async function tryHead(pathname: string, token: string): Promise<string | null> {
-  try {
-    const meta = await head(pathname, { token })
-    return meta?.url ?? null
-  } catch {
-    return null
-  }
-}
-
 async function resolveMedia(hash: string): Promise<ResolvedMedia> {
-  const token = process.env.BLOB_READ_WRITE_TOKEN
-  if (!token) return { image: FALLBACK_IMAGE }
-
-  // Poster (jpg/png) → wallet tile thumbnail. Video (mp4/webm) →
-  // animation_url so wallets that support it (Tonkeeper, Getgems)
-  // play the clip inline. We probe BOTH so a video mint gets both
-  // a first-frame poster tile AND the playable video — previous
-  // versions early-returned on the poster and dropped animation_url,
-  // which made video NFTs display as a still image + no playback.
-  const [jpgUrl, pngUrl, mp4Url, webmUrl] = await Promise.all([
-    tryHead(`captures/${hash}.jpg`, token),
-    tryHead(`captures/${hash}.png`, token),
-    tryHead(`captures/${hash}.mp4`, token),
-    tryHead(`captures/${hash}.webm`, token),
-  ])
-  let image = jpgUrl || pngUrl
-  let video = mp4Url || webmUrl
-
-  // Fallback #1 — list every blob under the hash prefix. Catches an
-  // extension the strict head() probes miss (`.jpeg`, `.mov`, an
-  // uppercase suffix that survived somewhere, or a stray suffix from
-  // an older client). Without this we return the logo tile whenever a
-  // capture landed under a non-canonical name, which is exactly the
-  // "wallet shows fallback logo again" symptom.
-  if (!image || !video) {
-    try {
-      const listing = await list({ prefix: `captures/${hash}`, token })
-      for (const b of listing.blobs) {
-        const p = b.pathname.toLowerCase()
-        if (!image && /\.(jpe?g|png|webp|gif)$/.test(p)) image = b.url
-        if (!video && /\.(mp4|webm|mov|m4v)$/.test(p))  video = b.url
-      }
-    } catch { /* listing is a bonus — don't fail the request over it */ }
-  }
-
-  const resolved: ResolvedMedia = { image: image ?? FALLBACK_IMAGE }
-  if (video) resolved.animation_url = video
+  // Delegates to the shared mediaResolver so this route and the
+  // /api/proof/<hash> route always see the same media. Falls back to
+  // the wordmark logo when the capture never made it to Blob (early
+  // beta records, upload failures).
+  const r = await resolveCaptureMedia(hash)
+  const resolved: ResolvedMedia = { image: r.imageUrl ?? FALLBACK_IMAGE }
+  if (r.animationUrl) resolved.animation_url = r.animationUrl
   return resolved
 }
 

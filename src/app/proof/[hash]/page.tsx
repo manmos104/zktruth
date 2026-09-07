@@ -1,6 +1,7 @@
 import type { Metadata } from 'next'
 import { headers } from 'next/headers'
 import { getProofByHash, type ProofRecord } from '@/lib/proofStore'
+import { resolveCaptureMedia, type ResolvedCaptureMedia } from '@/lib/mediaResolver'
 
 /**
  * Phase 5 rewrite — /proof/<hash>
@@ -41,6 +42,7 @@ interface ProofApiResponse {
   hash: string
   proof: ProofRecord | null
   onchain: OnchainInfo | null
+  media: ResolvedCaptureMedia
   verified: boolean
   reason?: string
 }
@@ -54,15 +56,21 @@ async function loadProof(hash: string): Promise<ProofApiResponse> {
     hash,
     proof: null,
     onchain: null,
+    media: { hasMedia: false },
     verified: false,
   }
   if (!/^[0-9a-f]{64}$/.test(hash)) {
     empty.reason = 'invalid hash format'
     return empty
   }
-  const proof = await getProofByHash(hash).catch(() => null)
+  // Resolve KV proof + direct Blob media in parallel so the video
+  // shows immediately even before tonapi has indexed the new Item.
+  const [proof, media] = await Promise.all([
+    getProofByHash(hash).catch(() => null),
+    resolveCaptureMedia(hash).catch(() => ({ hasMedia: false } as ResolvedCaptureMedia)),
+  ])
 
-  // Reuse the /api/proof route for tonapi cross-check to avoid
+  // Reuse the /api/proof route for the tonapi cross-check to avoid
   // duplicating the scan logic. We call it as an INTERNAL request; the
   // host is derived from the request headers so it works on preview
   // deployments too.
@@ -74,8 +82,6 @@ async function loadProof(hash: string): Promise<ProofApiResponse> {
     const proto = h.get('x-forwarded-proto') ?? 'https'
     const host = h.get('host') ?? 'zktruth.vercel.app'
     const res = await fetch(`${proto}://${host}/api/proof/${hash}`, {
-      // Short revalidation matches the API's own cache header — we
-      // don't want the SSR page to lag behind the client-side re-fetch.
       next: { revalidate: 15 },
     })
     if (res.ok) {
@@ -87,7 +93,7 @@ async function loadProof(hash: string): Promise<ProofApiResponse> {
   } catch (err) {
     console.warn('[proof-page] on-chain lookup failed', err)
   }
-  return { hash, proof, onchain, verified, reason }
+  return { hash, proof, onchain, media, verified, reason }
 }
 
 export async function generateMetadata(
@@ -123,7 +129,7 @@ export default async function ProofPage(
   const { hash: raw } = await params
   const hash = raw.toLowerCase()
   const data = await loadProof(hash)
-  const { proof, onchain, verified } = data
+  const { proof, onchain, media, verified } = data
 
   // Build the display state. Three tiers: verified (on-chain), pending
   // (client claim only), notFound (nothing).
@@ -141,8 +147,15 @@ export default async function ProofPage(
     : state === 'pending' ? 'Mint recorded — indexer is catching up'
     : 'No mint record and no on-chain item for this hash'
 
-  const posterUrl = onchain?.imageUrl ?? proof?.posterUrl ?? proof?.mediaUrl
-  const videoUrl = onchain?.animationUrl ?? proof?.mediaUrl
+  // Media source priority (highest first):
+  //   1. `media.*` — direct Blob HEAD, always current
+  //   2. `onchain.*` — tonapi cached metadata (can lag by minutes for
+  //      a fresh mint)
+  //   3. `proof.*` — client-declared URLs (rarely populated; kept as
+  //      a defensive fallback for legacy records)
+  const posterUrl = media.posterUrl ?? media.imageUrl
+    ?? onchain?.imageUrl ?? proof?.posterUrl ?? proof?.mediaUrl
+  const videoUrl = media.animationUrl ?? onchain?.animationUrl ?? proof?.mediaUrl
 
   const tgLink = proof?.telegramPostUrl
   const walletAddr = onchain?.ownerAddress ?? proof?.wallet

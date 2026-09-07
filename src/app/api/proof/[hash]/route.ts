@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
 import { getProofByHash, type ProofRecord } from '@/lib/proofStore'
+import { resolveCaptureMedia } from '@/lib/mediaResolver'
 
 /**
  * GET /api/proof/<hash>
@@ -97,6 +98,19 @@ interface ProofResponse {
     marketplaceUrl?: string
     tonviewerUrl?: string
   } | null
+  /**
+   * Direct-from-Blob media. Independent of tonapi's cache — a fresh
+   * mint whose Item metadata isn't indexed yet still has playable
+   * media as long as the upload landed on Blob. The /proof page
+   * prefers this over `onchain.imageUrl` / `onchain.animationUrl`
+   * so freshly-minted videos play right away.
+   */
+  media: {
+    imageUrl?: string
+    animationUrl?: string
+    posterUrl?: string
+    hasMedia: boolean
+  }
   verified: boolean
   reason?: string
 }
@@ -112,6 +126,7 @@ export async function GET(
     hash,
     proof: null,
     onchain: null,
+    media: { hasMedia: false },
     verified: false,
   }
 
@@ -120,11 +135,20 @@ export async function GET(
     return NextResponse.json(out, { status: 400 })
   }
 
-  try {
-    out.proof = await getProofByHash(hash)
-  } catch (err) {
-    console.warn('[proof] KV read failed', err)
-  }
+  // Kick off proofStore read + Blob media resolution in parallel with
+  // the tonapi scan below. All three are independent so waiting for
+  // them serially would triple the /proof latency for no reason.
+  const [proofRes, mediaRes] = await Promise.all([
+    getProofByHash(hash).catch((err) => {
+      console.warn('[proof] KV read failed', err); return null
+    }),
+    resolveCaptureMedia(hash).catch((err) => {
+      console.warn('[proof] Blob resolve failed', err)
+      return { hasMedia: false, imageUrl: undefined, animationUrl: undefined, posterUrl: undefined }
+    }),
+  ])
+  out.proof = proofRes
+  out.media = mediaRes
 
   // Cross-check on-chain via tonapi. If proof is absent we still try to
   // find the item — this lets /proof/<hash> work for older NFTs that
