@@ -102,9 +102,32 @@ export async function generateMetadata(
   const { hash: raw } = await params
   const hash = raw.toLowerCase()
   const short = hash.length >= 10 ? `${hash.slice(0, 6)}…${hash.slice(-4)}` : hash
+  const title = `zkTruth Proof #${short}`
+  const description = 'On-chain, tamper-evident proof of capture — SHA-256 anchored on TON.'
+
+  // Task #27: when the capture exists on Blob, use its raw URL as the
+  // OG/Twitter card image. Twitter, Telegram, Discord, iMessage all
+  // fetch this URL directly and render the actual square photo/frame
+  // rather than our branded /twitter-image endpoint. That endpoint
+  // stays as the fallback for hashes that never uploaded media.
+  const media = /^[0-9a-f]{64}$/.test(hash)
+    ? await resolveCaptureMedia(hash).catch(() => ({ hasMedia: false } as ResolvedCaptureMedia))
+    : ({ hasMedia: false } as ResolvedCaptureMedia)
+  const captureImage = media.imageUrl
   return {
-    title: `zkTruth Proof #${short}`,
-    description: `On-chain, tamper-evident proof of capture — SHA-256 anchored on TON.`,
+    title,
+    description,
+    openGraph: {
+      title,
+      description,
+      images: captureImage ? [captureImage] : undefined,
+    },
+    twitter: {
+      card: 'summary_large_image',
+      title,
+      description,
+      images: captureImage ? [captureImage] : undefined,
+    },
   }
 }
 
