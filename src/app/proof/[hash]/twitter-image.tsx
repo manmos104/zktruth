@@ -13,16 +13,19 @@ import { resolveCaptureMedia } from '@/lib/mediaResolver'
  * legacy record), the whole card falls back to the previous wordmark-
  * only design so a share link never renders blank.
  *
- * The layout is 1200×630 (Twitter's summary_large_image spec). The
+ * Layout is 1200×630 (Twitter's summary_large_image spec). The
  * capture square sits at 630×630 flush-left; the branded panel fills
  * the remaining 570×630 on the right.
+ *
+ * The capture is fetched SERVER-SIDE and inlined as a data URL rather
+ * than passed to Satori as a remote URL — Satori's remote-fetch path
+ * has been flaky in production (returns 500 on Blob URLs) so
+ * pre-fetching is the reliable path.
  */
 
 export const runtime = 'nodejs'
 export const size = { width: 1200, height: 630 }
 export const contentType = 'image/png'
-// Regenerate the card periodically as media / on-chain state changes.
-export const revalidate = 60
 
 // ---- Static asset preload (data URLs so Satori can inline) --------------
 
@@ -39,29 +42,52 @@ const fontsDir = path.join(process.cwd(), 'public', 'fonts')
 const syneMedium = safeReadFile(path.join(fontsDir, 'Syne-Medium.ttf'))
 const syneBold = safeReadFile(path.join(fontsDir, 'Syne-Bold.ttf'))
 
+/**
+ * Fetch a remote image and return it as a data URL. Bounded by a
+ * 5-second timeout and a 6 MB size cap so a slow / huge asset can't
+ * hang the OG image render (which itself has a Vercel Function
+ * timeout).
+ */
+async function fetchAsDataUrl(url: string): Promise<string | null> {
+  try {
+    const controller = new AbortController()
+    const timer = setTimeout(() => controller.abort(), 5000)
+    const res = await fetch(url, { signal: controller.signal, cache: 'no-store' })
+    clearTimeout(timer)
+    if (!res.ok) return null
+    const ct = res.headers.get('content-type') || 'image/jpeg'
+    // Only bother with things we can actually inline. Reject video etc.
+    if (!/^image\//i.test(ct)) return null
+    const ab = await res.arrayBuffer()
+    if (ab.byteLength > 6 * 1024 * 1024) return null
+    const b64 = Buffer.from(ab).toString('base64')
+    return `data:${ct};base64,${b64}`
+  } catch {
+    return null
+  }
+}
+
 // ---- Component ----------------------------------------------------------
 
 export default async function TwitterImage(
-  { params }: { params: Promise<{ hash: string }> | { hash: string } },
+  { params }: { params: { hash: string } },
 ) {
-  // Next.js 15 delivers params as a Promise. Older shape kept as a
-  // fallback so the type stays permissive.
-  const resolved = await Promise.resolve(params as { hash: string })
-  const rawHash = resolved?.hash ?? ''
+  const rawHash = params?.hash ?? ''
   const hash = rawHash.toLowerCase()
   const shortHash = hash.length >= 18
     ? `${hash.slice(0, 10)}…${hash.slice(-8)}`
     : hash
 
-  // Try to attach the actual capture. `resolveCaptureMedia` returns
-  // the Blob public URL — Satori can fetch that at render time. When
-  // both video and still are present (video mint), the still is used
-  // as the card visual because Satori can't render <video>.
-  let captureUrl: string | undefined
+  // Resolve the Blob URL for the capture then pull the actual bytes
+  // so Satori has them as a data URL. Both steps are best-effort —
+  // any failure falls through to the wordmark-only design.
+  let captureDataUrl: string | null = null
   try {
     const m = await resolveCaptureMedia(hash)
-    captureUrl = m.imageUrl // .jpg poster, primary tile candidate
-  } catch { /* fall through to wordmark-only card */ }
+    if (m.imageUrl) {
+      captureDataUrl = await fetchAsDataUrl(m.imageUrl)
+    }
+  } catch { /* fall through */ }
 
   return new ImageResponse(
     (
@@ -74,7 +100,7 @@ export default async function TwitterImage(
           fontFamily: 'Syne',
         }}
       >
-        {captureUrl ? (
+        {captureDataUrl ? (
           <>
             {/* LEFT — actual capture, 630×630 square flush-left. */}
             <div
@@ -88,7 +114,7 @@ export default async function TwitterImage(
             >
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img
-                src={captureUrl}
+                src={captureDataUrl}
                 alt="Capture"
                 width={630}
                 height={630}
@@ -99,7 +125,6 @@ export default async function TwitterImage(
                   display: 'flex',
                 }}
               />
-              {/* Bottom-left pill on the capture: "PROOF" */}
               <div
                 style={{
                   position: 'absolute',
@@ -133,7 +158,6 @@ export default async function TwitterImage(
                 padding: '56px 48px',
               }}
             >
-              {/* Top spacer / verified pill */}
               <div style={{ display: 'flex' }}>
                 <div
                   style={{
@@ -153,7 +177,6 @@ export default async function TwitterImage(
                   VERIFIED · TON CHAIN
                 </div>
               </div>
-              {/* Wordmark logo */}
               {logoDataUrl ? (
                 // eslint-disable-next-line @next/next/no-img-element
                 <img
@@ -166,7 +189,6 @@ export default async function TwitterImage(
               ) : (
                 <div style={{ fontSize: 72, fontWeight: 800, color: '#111', display: 'flex' }}>zkTruth</div>
               )}
-              {/* Tagline + short hash */}
               <div
                 style={{
                   display: 'flex',
@@ -202,8 +224,6 @@ export default async function TwitterImage(
           </>
         ) : (
           // ---- FALLBACK LAYOUT (no capture URL available) ----
-          // Reuses the original wordmark-centric card so a share URL
-          // without media (free post / stale hash) still looks polished.
           <div
             style={{
               width: '100%',
