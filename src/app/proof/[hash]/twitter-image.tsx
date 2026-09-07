@@ -83,9 +83,13 @@ async function fetchAsDataUrl(url: string): Promise<string | null> {
 // ---- Component ----------------------------------------------------------
 
 export default async function TwitterImage(
-  { params }: { params: { hash: string } },
+  { params }: { params: Promise<{ hash: string }> | { hash: string } },
 ) {
-  const rawHash = params?.hash ?? ''
+  // Next.js 15 delivers image-route params as a Promise; older
+  // versions passed a plain object. Await Promise.resolve() so
+  // both shapes flow through the same code path.
+  const p = await Promise.resolve(params) as { hash?: string }
+  const rawHash = p?.hash ?? ''
   const hash = rawHash.toLowerCase()
   const shortHash = hash.length >= 18
     ? `${hash.slice(0, 10)}…${hash.slice(-8)}`
