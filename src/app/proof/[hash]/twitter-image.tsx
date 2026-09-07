@@ -51,18 +51,31 @@ const syneBold = safeReadFile(path.join(fontsDir, 'Syne-Bold.ttf'))
 async function fetchAsDataUrl(url: string): Promise<string | null> {
   try {
     const controller = new AbortController()
-    const timer = setTimeout(() => controller.abort(), 5000)
+    const timer = setTimeout(() => controller.abort(), 10_000)
     const res = await fetch(url, { signal: controller.signal, cache: 'no-store' })
     clearTimeout(timer)
-    if (!res.ok) return null
-    const ct = res.headers.get('content-type') || 'image/jpeg'
-    // Only bother with things we can actually inline. Reject video etc.
-    if (!/^image\//i.test(ct)) return null
+    if (!res.ok) {
+      console.warn('[og] capture fetch not ok', res.status, url)
+      return null
+    }
+    // Derive content-type from URL extension if the header is missing
+    // or vague (Vercel Blob occasionally returns application/octet-stream
+    // for freshly uploaded blobs before the CDN reconciles).
+    let ct = res.headers.get('content-type') || ''
+    if (!/^image\//i.test(ct)) {
+      if (/\.png(\?|$)/i.test(url)) ct = 'image/png'
+      else if (/\.webp(\?|$)/i.test(url)) ct = 'image/webp'
+      else ct = 'image/jpeg'
+    }
     const ab = await res.arrayBuffer()
-    if (ab.byteLength > 6 * 1024 * 1024) return null
+    if (ab.byteLength > 6 * 1024 * 1024) {
+      console.warn('[og] capture too large', ab.byteLength, url)
+      return null
+    }
     const b64 = Buffer.from(ab).toString('base64')
     return `data:${ct};base64,${b64}`
-  } catch {
+  } catch (err) {
+    console.warn('[og] fetch failed', err instanceof Error ? err.message : String(err), url)
     return null
   }
 }
@@ -86,8 +99,15 @@ export default async function TwitterImage(
     const m = await resolveCaptureMedia(hash)
     if (m.imageUrl) {
       captureDataUrl = await fetchAsDataUrl(m.imageUrl)
+      if (!captureDataUrl) {
+        console.warn('[og] resolved imageUrl but fetch failed', hash, m.imageUrl)
+      }
+    } else {
+      console.warn('[og] no imageUrl resolved for', hash)
     }
-  } catch { /* fall through */ }
+  } catch (err) {
+    console.warn('[og] resolveCaptureMedia threw', err instanceof Error ? err.message : String(err))
+  }
 
   return new ImageResponse(
     (
