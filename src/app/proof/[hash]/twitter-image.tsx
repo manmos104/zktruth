@@ -107,10 +107,12 @@ export default async function TwitterImage(
         console.warn('[og] resolved imageUrl but fetch failed', hash, m.imageUrl)
       }
     } else {
-      console.warn('[og] no imageUrl resolved for', hash)
+      // Bump to error level so it lands in Vercel's error stream and
+      // is visible without --level=warn.
+      console.error('[og] no imageUrl resolved for', hash)
     }
   } catch (err) {
-    console.warn('[og] resolveCaptureMedia threw', err instanceof Error ? err.message : String(err))
+    console.error('[og] resolveCaptureMedia threw', err instanceof Error ? err.message : String(err))
   }
 
   return new ImageResponse(
@@ -126,50 +128,23 @@ export default async function TwitterImage(
       >
         {captureDataUrl ? (
           <>
-            {/* LEFT — actual capture, 630×630 square flush-left. */}
-            <div
+            {/* LEFT — actual capture, 630×630 square flush-left.
+                Simplified: no absolutely-positioned overlay pill (Satori
+                mixes flex + absolute inconsistently; we lost 500s to it).
+                The PROOF · TON badge lives on the right panel instead. */}
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src={captureDataUrl}
+              alt="Capture"
+              width={630}
+              height={630}
               style={{
                 width: 630,
                 height: 630,
+                objectFit: 'cover',
                 display: 'flex',
-                position: 'relative',
-                background: '#000',
               }}
-            >
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img
-                src={captureDataUrl}
-                alt="Capture"
-                width={630}
-                height={630}
-                style={{
-                  width: 630,
-                  height: 630,
-                  objectFit: 'cover',
-                  display: 'flex',
-                }}
-              />
-              <div
-                style={{
-                  position: 'absolute',
-                  bottom: 20,
-                  left: 20,
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 8,
-                  padding: '6px 14px',
-                  background: 'rgba(0,0,0,0.68)',
-                  borderRadius: 999,
-                  color: '#fff',
-                  fontSize: 14,
-                  letterSpacing: 3,
-                  fontWeight: 500,
-                }}
-              >
-                <div style={{ width: 8, height: 8, borderRadius: 8, background: '#00c864' }} />
-                PROOF · TON
-              </div>
-            </div>
+            />
             {/* RIGHT — branded panel, 570×630. */}
             <div
               style={{
