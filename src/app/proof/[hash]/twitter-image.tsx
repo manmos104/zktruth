@@ -95,20 +95,16 @@ export default async function TwitterImage(
     ? `${hash.slice(0, 10)}…${hash.slice(-8)}`
     : hash
 
-  // Resolve the Blob URL for the capture then pull the actual bytes
-  // so Satori has them as a data URL. Both steps are best-effort —
-  // any failure falls through to the wordmark-only design.
-  let captureDataUrl: string | null = null
+  // Resolve the Blob URL for the capture. We hand the URL directly
+  // to Satori — its built-in fetcher handles remote images and
+  // avoids the base64 balloon that was blowing up ImageResponse
+  // when we pre-encoded the JPEG.
+  let captureUrl: string | null = null
   try {
     const m = await resolveCaptureMedia(hash)
     if (m.imageUrl) {
-      captureDataUrl = await fetchAsDataUrl(m.imageUrl)
-      if (!captureDataUrl) {
-        console.warn('[og] resolved imageUrl but fetch failed', hash, m.imageUrl)
-      }
+      captureUrl = m.imageUrl
     } else {
-      // Bump to error level so it lands in Vercel's error stream and
-      // is visible without --level=warn.
       console.error('[og] no imageUrl resolved for', hash)
     }
   } catch (err) {
@@ -126,7 +122,7 @@ export default async function TwitterImage(
           fontFamily: 'Syne',
         }}
       >
-        {captureDataUrl ? (
+        {captureUrl ? (
           <>
             {/* LEFT — actual capture, 630×630 square flush-left.
                 Simplified: no absolutely-positioned overlay pill (Satori
@@ -134,16 +130,11 @@ export default async function TwitterImage(
                 The PROOF · TON badge lives on the right panel instead. */}
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img
-              src={captureDataUrl}
+              src={captureUrl}
               alt="Capture"
               width={630}
               height={630}
-              style={{
-                width: 630,
-                height: 630,
-                objectFit: 'cover',
-                display: 'flex',
-              }}
+              style={{ width: 630, height: 630, display: 'flex' }}
             />
             {/* RIGHT — branded panel, 570×630. */}
             <div
