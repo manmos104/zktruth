@@ -114,6 +114,17 @@ export async function generateMetadata(
     ? await resolveCaptureMedia(hash).catch(() => ({ hasMedia: false } as ResolvedCaptureMedia))
     : ({ hasMedia: false } as ResolvedCaptureMedia)
   const captureImage = media.imageUrl
+  const captureVideo = media.animationUrl
+  // Telegram + Discord render og:video inline in the link preview
+  // card when the URL points at a plain mp4/webm. Twitter needs a
+  // twitter:player card which is whitelist-only, so we don't ship
+  // that meta — X will keep showing the poster JPG on its own.
+  const videoMime =
+    captureVideo && /\.mp4(\?|$)/i.test(captureVideo)  ? 'video/mp4'
+    : captureVideo && /\.webm(\?|$)/i.test(captureVideo) ? 'video/webm'
+    : captureVideo && /\.mov(\?|$)/i.test(captureVideo)  ? 'video/quicktime'
+    : undefined
+
   return {
     title,
     description,
@@ -121,6 +132,15 @@ export async function generateMetadata(
       title,
       description,
       images: captureImage ? [captureImage] : undefined,
+      videos: captureVideo
+        ? [{
+            url: captureVideo,
+            secureUrl: captureVideo,
+            type: videoMime,
+            width: 1080,
+            height: 1080,
+          }]
+        : undefined,
     },
     twitter: {
       card: 'summary_large_image',
