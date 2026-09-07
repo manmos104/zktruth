@@ -3769,6 +3769,13 @@ export default function Home() {
           // Always credit the mint even if the user hasn't posted to
           // Telegram yet (messageId 0). The endpoint gracefully treats
           // 0 as "no post link" and still records the post event.
+          // Phase 5 — also ship the fields /proof/<hash> needs to render
+          // a full server-side proof card: capture timestamp (seconds),
+          // GPS hash (as decimal string so JSON.stringify doesn't choke
+          // on a BigInt), and the Telegram post URL if we have one.
+          const captureTsSec = proofData?.timestamp
+            ? Math.floor(new Date(proofData.timestamp).getTime() / 1000)
+            : Math.floor(Date.now() / 1000)
           fetch('/api/trust/mint', {
             method: 'POST',
             headers: { 'content-type': 'application/json' },
@@ -3779,6 +3786,8 @@ export default function Home() {
               // Paid NFT mint path — MUST be explicit so the API
               // weights it ×10 and lifts the score-gate for this wallet.
               kind: 'mint',
+              captureTimestampSec: captureTsSec,
+              gpsHashDec: gpsHash.toString(),
             }),
           })
             .then(() => setTrustRefreshCount((n) => n + 1))

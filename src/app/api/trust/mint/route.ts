@@ -6,6 +6,12 @@ import {
   type MessageRecord,
 } from '@/lib/trustStore'
 import { creditMintToPool } from '@/lib/rewardPool'
+import { saveProof, type ProofRecord } from '@/lib/proofStore'
+
+const ZKTRUTH_COLLECTION = 'EQBHzSXx-b8tXjka-TfBeEomFpzxGJujIIeUgFzEohvfjMU_'
+const TELEGRAM_CHANNEL_URL_BASE =
+  process.env.NEXT_PUBLIC_TELEGRAM_CHANNEL_URL_BASE
+  ?? 'https://t.me/zktruth_channel'
 
 /**
  * Record a successful zkTruth mint against the author's wallet.
@@ -46,6 +52,13 @@ export async function POST(request: Request) {
     messageId?: number
     contentHashHex?: string
     kind?: 'free' | 'mint'
+    // ---- Phase 5 additions --------------------------------------
+    // Only relevant when kind === 'mint'. Free posts don't have an
+    // on-chain anchor to point at from /proof/<hash>.
+    captureTimestampSec?: number
+    gpsHashDec?: string
+    mediaUrl?: string
+    posterUrl?: string
   }
   try {
     body = await request.json()
@@ -54,10 +67,9 @@ export async function POST(request: Request) {
   }
   const rawWallet = body?.wallet
   const messageIdRaw = body?.messageId
-  // contentHashHex is still accepted for API compatibility but no
-  // longer drives an attestation bonus — the ×1.3 ATTESTATION_MULTIPLIER
-  // in trustStore.computeScore already boosts any attested post.
-  //
+  const contentHashHex = typeof body?.contentHashHex === 'string'
+    ? body.contentHashHex.toLowerCase()
+    : ''
   // `kind` distinguishes a FREE hash-only post (weight 1, daily-capped)
   // from a paid NFT MINT (weight 10, gates score+rewards). Defaults to
   // 'free' for safety — a caller can't accidentally inflate score by
@@ -97,6 +109,40 @@ export async function POST(request: Request) {
     // is 100% funded by mint fees, so a free post must not increment it.
     if (kind === 'mint') {
       try { await creditMintToPool(messageId) } catch { /* ignore */ }
+
+      // Phase 5 — persist the proof record so /proof/<hash> can look
+      // it up server-side and cross-check against the on-chain Item.
+      // Free posts skip this on purpose: they don't create an NFT,
+      // so there's nothing to anchor for verification.
+      if (/^[0-9a-f]{64}$/.test(contentHashHex)) {
+        const captureTs =
+          typeof body?.captureTimestampSec === 'number'
+          && Number.isFinite(body.captureTimestampSec)
+          && body.captureTimestampSec > 0
+            ? Math.floor(body.captureTimestampSec)
+            : Math.floor(now / 1000)
+        const rec: ProofRecord = {
+          contentHashHex,
+          wallet,
+          captureTimestampSec: captureTs,
+          telegramMessageId: messageId,
+          telegramPostUrl: messageId > 0
+            ? `${TELEGRAM_CHANNEL_URL_BASE.replace(/\/$/, '')}/${messageId}`
+            : undefined,
+          mediaUrl: typeof body?.mediaUrl === 'string' ? body.mediaUrl : undefined,
+          posterUrl: typeof body?.posterUrl === 'string' ? body.posterUrl : undefined,
+          gpsHashDec: typeof body?.gpsHashDec === 'string' ? body.gpsHashDec : undefined,
+          mintedAt: now,
+          chain: 'ton-mainnet',
+          collection: ZKTRUTH_COLLECTION,
+        }
+        try { await saveProof(rec) } catch (err) {
+          // proofStore failure is non-fatal — the mint still counts
+          // toward Trust Score; /proof/<hash> will just fall back to
+          // the on-chain-only path (item address discovery via tonapi).
+          console.warn('[mint] saveProof failed', err)
+        }
+      }
     }
 
     return NextResponse.json({
