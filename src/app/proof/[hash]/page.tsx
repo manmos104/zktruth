@@ -74,22 +74,25 @@ export async function generateMetadata(
   const title = `zkTruth Proof #${short}`
   const description = 'On-chain, tamper-evident proof of capture — SHA-256 anchored on TON. Join the channel: t.me/zktruth_channel'
 
-  // We intentionally leave `openGraph.images` / `twitter.images`
-  // unset so Next.js falls back to the sibling twitter-image /
-  // opengraph-image routes. Those render a branded wordmark card
-  // with the short SHA-256 line at the bottom (the "0x… address"
-  // look), which the user prefers over the raw capture photo.
+  // Explicitly point at the Satori-rendered wordmark card so no
+  // ambient auto-detection surprises us. That endpoint draws the
+  // "VERIFIED · TON CHAIN" pill, the zkTruth wordmark, "Proof of
+  // Capture" tagline, and the short SHA-256 line at the bottom —
+  // the branded card the user asked to keep.
+  const cardUrl = `https://zktruth.vercel.app/proof/${hash}/twitter-image`
   return {
     title,
     description,
     openGraph: {
       title,
       description,
+      images: [{ url: cardUrl, width: 1200, height: 630 }],
     },
     twitter: {
       card: 'summary_large_image',
       title,
       description,
+      images: [cardUrl],
     },
   }
 }
