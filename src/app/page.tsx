@@ -3997,10 +3997,28 @@ export default function Home() {
     if (trimmedComment) {
       captionLines.push('', `<i>${trimmedComment}</i>`)
     }
-    captionLines.push(
-      '',
-      'Captured with <a href="https://zktruth.vercel.app">zkTruth</a> · Proof of Capture on TON.',
-    )
+    // Include the /proof/<hash> URL BOTH as a hyperlink on the
+    // "zkTruth" wordmark AND as a bare URL on its own line. The bare
+    // URL is what matters when someone shares this post to X —
+    // Telegram's "Share to X" pre-fills the tweet with the caption
+    // text, and X scrapes the last URL in a tweet for its card.
+    // Because our /proof/<hash> URL now emits its own rich OG image /
+    // video / description, the X card carries our thumbnail and the
+    // "About zkTruth" write-up rather than Telegram's generic preview.
+    if (proofData?.hash) {
+      const proofUrl = `https://zktruth.vercel.app/proof/${proofData.hash.replace(/^0x/, '')}`
+      captionLines.push(
+        '',
+        `Captured with <a href="${proofUrl}">zkTruth</a> · Proof of Capture on TON.`,
+        '',
+        `🔗 Verify & share: ${proofUrl}`,
+      )
+    } else {
+      captionLines.push(
+        '',
+        'Captured with <a href="https://zktruth.vercel.app">zkTruth</a> · Proof of Capture on TON.',
+      )
+    }
     const caption = captionLines.join('\n')
 
     // Route by real container: MP4 goes through sendVideo so
