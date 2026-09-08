@@ -242,14 +242,55 @@ export async function ProofView({ hash: rawHash }: { hash: string }) {
           </div>
         )}
 
+        <section className="proof-about">
+          <div className="proof-about-title">About zkTruth</div>
+          <div className="proof-about-lead">
+            A community-owned proof-of-capture network. Every photo and
+            video is hashed the moment it&apos;s shot, anchored on TON, and
+            published to a public Telegram channel — turning ordinary
+            phones into an anti-fake-news distribution layer.
+          </div>
+          <ul className="proof-about-list">
+            <li>
+              <span className="proof-about-tag">Authenticity</span>
+              SHA-256 of the raw sensor frame is written to a TEP-62 NFT
+              on TON mainnet. Any pixel edit changes the hash — mismatch
+              = tampering.
+            </li>
+            <li>
+              <span className="proof-about-tag">Anti fake-news</span>
+              Timestamp and GPS are captured on-device and signed against
+              a Telegram-verified identity, so a rehosted or backdated
+              image can&apos;t pass as a fresh eyewitness capture.
+            </li>
+            <li>
+              <span className="proof-about-tag">Decentralised reporting</span>
+              Anyone with a phone can publish to the channel; no central
+              editor decides what counts as news. Feed integrity comes
+              from the chain, not from a masthead.
+            </li>
+            <li>
+              <span className="proof-about-tag">Incentives</span>
+              Every mint funnels 85% of its fee into a weekly reward pool
+              paid to the Top 100 authors. Trust Score rewards mints,
+              reactions, and posts — quality reporting pays.
+            </li>
+          </ul>
+          <div className="proof-about-cta-row">
+            <a className="proof-cta" href="https://t.me/zktruth_channel" target="_blank" rel="noopener noreferrer">
+              Join the zkTruth Channel ↗
+            </a>
+            <a className="proof-cta secondary" href="https://t.me/zktruth_bot" target="_blank" rel="noopener noreferrer">
+              Launch Mini App ↗
+            </a>
+          </div>
+        </section>
+
         <footer className="proof-footer">
           <div className="proof-footer-chain">
             <span className="proof-footer-dot" />
             POWERED BY TON
           </div>
-          <a className="proof-footer-link" href="https://t.me/zktruth_bot">
-            Launch the zkTruth Mini App ↗
-          </a>
         </footer>
       </div>
     </>
@@ -408,4 +449,45 @@ body { background: #000; }
 }
 .proof-footer-link { font-size: 10px; color: #00c8ff; text-decoration: none; }
 .proof-footer-link:hover { text-decoration: underline; }
+.proof-about {
+  width: 100%; max-width: 420px; margin-top: 28px;
+  padding: 22px 22px 26px;
+  border-radius: 20px;
+  border: 1px solid rgba(0,200,255,0.12);
+  background: rgba(0,0,0,0.5);
+  backdrop-filter: blur(20px);
+  box-shadow: 0 4px 40px rgba(0,0,0,0.4);
+}
+.proof-about-title {
+  font-family: 'Syne', sans-serif; font-weight: 800; font-style: italic;
+  font-size: 15px;
+  background: linear-gradient(135deg, #00ff87 0%, #00c8ff 60%, #a78bfa 100%);
+  -webkit-background-clip: text; background-clip: text;
+  -webkit-text-fill-color: transparent; color: transparent;
+  letter-spacing: 1px; margin-bottom: 10px;
+}
+.proof-about-lead {
+  font-size: 12.5px; line-height: 1.6; color: rgba(255,255,255,0.82);
+  margin-bottom: 14px;
+}
+.proof-about-list {
+  list-style: none; padding: 0; margin: 0;
+  display: flex; flex-direction: column; gap: 12px;
+}
+.proof-about-list li {
+  font-size: 12px; line-height: 1.55; color: rgba(255,255,255,0.72);
+}
+.proof-about-tag {
+  display: inline-block; font-family: 'Space Mono', monospace;
+  font-size: 9px; font-weight: 700; letter-spacing: 1.6px;
+  text-transform: uppercase;
+  color: #00c8ff;
+  background: rgba(0,200,255,0.10);
+  border: 1px solid rgba(0,200,255,0.28);
+  padding: 3px 8px; border-radius: 999px; margin-right: 8px;
+  vertical-align: 1px;
+}
+.proof-about-cta-row {
+  display: flex; flex-direction: column; gap: 10px; margin-top: 16px;
+}
 `

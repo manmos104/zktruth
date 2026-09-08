@@ -1,70 +1,23 @@
 import type { Metadata } from 'next'
-import { headers } from 'next/headers'
-import { redirect } from 'next/navigation'
-import { getProofByHash } from '@/lib/proofStore'
 import { resolveCaptureMedia, type ResolvedCaptureMedia } from '@/lib/mediaResolver'
 import { ProofView } from './_view'
 
 /**
  * /proof/<hash>
  *
- * Dual-mode entry point:
- *   - SNS scrapers (Twitter, Telegram, Discord, Facebook, iMessage, …)
- *     receive the full HTML with rich Open Graph meta tags: image /
- *     video from Vercel Blob, title, description. The page body renders
- *     the same verification card so any preview crawler that follows
- *     the link (e.g. `curl` from a chat bot) sees a real page.
- *   - Human viewers are 302-redirected straight to the linked Telegram
- *     channel post. Tapping the SNS card feels like "the photo took me
- *     to the community", not "the photo took me to a technical proof
- *     page". The verification UI is still reachable via /verify.
+ * Public verification page. Both SNS scrapers and human viewers get
+ * the same body — a card showing the capture timestamp, GPS status,
+ * SHA-256 hash, on-chain anchor and the linked Telegram post, plus a
+ * short "About zkTruth" section explaining what the product is doing
+ * (authenticity guarantee, anti-fake-news, decentralised journalism,
+ * incentive structure).
  *
- * We distinguish scrapers from humans by User-Agent. It's imperfect
- * (a determined actor can fake either) but reliable enough for OG /
- * card scraping which uses well-known crawler identities.
+ * OG meta tags in the head point image/video at the raw capture on
+ * Vercel Blob so the shared thumbnail on X / Telegram / Discord is
+ * the actual photo, and the title carries the short hash.
  */
 
 export const revalidate = 15
-
-// User-Agent substrings for the SNS crawlers we care about. Anything
-// that matches one of these gets served the full HTML + OG meta so the
-// preview card can render. Everything else counts as a human visit and
-// gets bounced to the Telegram channel.
-const BOT_UA_PATTERNS = [
-  'twitterbot',
-  'facebookexternalhit',
-  'facebot',
-  'telegrambot',
-  'discordbot',
-  'slackbot',
-  'linkedinbot',
-  'whatsapp',
-  'linebot',
-  'line/',
-  'skypeuripreview',
-  'applebot',
-  'redditbot',
-  'pinterest',
-  'embedly',
-  'quora link preview',
-  'showyoubot',
-  'outbrain',
-  'vkshare',
-  'w3c_validator',
-  'iframely',
-  'nuzzel',
-  'bitlybot',
-  'yahoo! slurp',
-  'googlebot',
-  'bingbot',
-]
-
-function isBotUserAgent(ua: string): boolean {
-  const lower = ua.toLowerCase()
-  return BOT_UA_PATTERNS.some((p) => lower.includes(p))
-}
-
-const FALLBACK_TELEGRAM = 'https://t.me/zktruth_channel'
 
 export async function generateMetadata(
   { params }: { params: Promise<{ hash: string }> },
@@ -124,23 +77,10 @@ export default async function ProofPage(
 ) {
   const { hash: raw } = await params
   const hash = raw.toLowerCase()
-
-  const h = await headers()
-  const ua = h.get('user-agent') ?? ''
-
-  // Non-bot? Redirect straight to the Telegram channel post so the
-  // shared SNS card feels like a portal into the community, not a
-  // detour through a proof card. The verification UI lives at
-  // /proof/<hash>/verify for anyone who actually wants receipts.
-  if (!isBotUserAgent(ua)) {
-    let target = FALLBACK_TELEGRAM
-    try {
-      const proof = await getProofByHash(hash)
-      if (proof?.telegramPostUrl) target = proof.telegramPostUrl
-    } catch { /* fall back to channel root */ }
-    redirect(target)
-  }
-
-  // Bot — render the proof card so their OG scraper has real content.
+  // Humans and bots both land on the verification card — the redirect
+  // to Telegram was pulled back at the user's request. The card itself
+  // now carries the timestamp / GPS / hash + a short "About zkTruth"
+  // section so a first-time visitor gets both the receipt and the
+  // product pitch in one view.
   return <ProofView hash={hash} />
 }
