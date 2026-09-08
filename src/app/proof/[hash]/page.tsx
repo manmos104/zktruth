@@ -2,6 +2,7 @@ import type { Metadata } from 'next'
 import { headers } from 'next/headers'
 import { redirect } from 'next/navigation'
 import { getProofByHash } from '@/lib/proofStore'
+import { resolveCaptureMedia, type ResolvedCaptureMedia } from '@/lib/mediaResolver'
 import { ProofView } from './_view'
 
 /**
@@ -74,25 +75,46 @@ export async function generateMetadata(
   const title = `zkTruth Proof #${short}`
   const description = 'On-chain, tamper-evident proof of capture — SHA-256 anchored on TON. Join the channel: t.me/zktruth_channel'
 
-  // Explicitly point at the Satori-rendered wordmark card so no
-  // ambient auto-detection surprises us. That endpoint draws the
-  // "VERIFIED · TON CHAIN" pill, the zkTruth wordmark, "Proof of
-  // Capture" tagline, and the short SHA-256 line at the bottom —
-  // the branded card the user asked to keep.
-  const cardUrl = `https://zktruth.vercel.app/proof/${hash}/twitter-image`
+  // Point og:image directly at the raw capture on Blob when we have
+  // one. Satori (via /twitter-image) kept 500'ing on JPEG data URLs
+  // even with the simplest possible layout — passing the Blob URL
+  // straight to the SNS scraper is the reliable path and the one
+  // that historically produced the thumbnail the user was happy with.
+  // The hash is already surfaced by the title (`zkTruth Proof #…`)
+  // so cards still carry the short address next to the image.
+  const media = /^[0-9a-f]{64}$/.test(hash)
+    ? await resolveCaptureMedia(hash).catch(() => ({ hasMedia: false } as ResolvedCaptureMedia))
+    : ({ hasMedia: false } as ResolvedCaptureMedia)
+  const captureImage = media.imageUrl
+  const captureVideo = media.animationUrl
+  const videoMime =
+    captureVideo && /\.mp4(\?|$)/i.test(captureVideo)  ? 'video/mp4'
+    : captureVideo && /\.webm(\?|$)/i.test(captureVideo) ? 'video/webm'
+    : captureVideo && /\.mov(\?|$)/i.test(captureVideo)  ? 'video/quicktime'
+    : undefined
+
   return {
     title,
     description,
     openGraph: {
       title,
       description,
-      images: [{ url: cardUrl, width: 1200, height: 630 }],
+      images: captureImage ? [captureImage] : undefined,
+      videos: captureVideo
+        ? [{
+            url: captureVideo,
+            secureUrl: captureVideo,
+            type: videoMime,
+            width: 1080,
+            height: 1080,
+          }]
+        : undefined,
     },
     twitter: {
       card: 'summary_large_image',
       title,
       description,
-      images: [cardUrl],
+      images: captureImage ? [captureImage] : undefined,
     },
   }
 }
