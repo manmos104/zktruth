@@ -2,7 +2,6 @@ import type { Metadata } from 'next'
 import { headers } from 'next/headers'
 import { redirect } from 'next/navigation'
 import { getProofByHash } from '@/lib/proofStore'
-import { resolveCaptureMedia, type ResolvedCaptureMedia } from '@/lib/mediaResolver'
 import { ProofView } from './_view'
 
 /**
@@ -75,39 +74,22 @@ export async function generateMetadata(
   const title = `zkTruth Proof #${short}`
   const description = 'On-chain, tamper-evident proof of capture — SHA-256 anchored on TON. Join the channel: t.me/zktruth_channel'
 
-  const media = /^[0-9a-f]{64}$/.test(hash)
-    ? await resolveCaptureMedia(hash).catch(() => ({ hasMedia: false } as ResolvedCaptureMedia))
-    : ({ hasMedia: false } as ResolvedCaptureMedia)
-  const captureImage = media.imageUrl
-  const captureVideo = media.animationUrl
-  const videoMime =
-    captureVideo && /\.mp4(\?|$)/i.test(captureVideo)  ? 'video/mp4'
-    : captureVideo && /\.webm(\?|$)/i.test(captureVideo) ? 'video/webm'
-    : captureVideo && /\.mov(\?|$)/i.test(captureVideo)  ? 'video/quicktime'
-    : undefined
-
+  // We intentionally leave `openGraph.images` / `twitter.images`
+  // unset so Next.js falls back to the sibling twitter-image /
+  // opengraph-image routes. Those render a branded wordmark card
+  // with the short SHA-256 line at the bottom (the "0x… address"
+  // look), which the user prefers over the raw capture photo.
   return {
     title,
     description,
     openGraph: {
       title,
       description,
-      images: captureImage ? [captureImage] : undefined,
-      videos: captureVideo
-        ? [{
-            url: captureVideo,
-            secureUrl: captureVideo,
-            type: videoMime,
-            width: 1080,
-            height: 1080,
-          }]
-        : undefined,
     },
     twitter: {
       card: 'summary_large_image',
       title,
       description,
-      images: captureImage ? [captureImage] : undefined,
     },
   }
 }
