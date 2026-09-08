@@ -3876,7 +3876,12 @@ export default function Home() {
     if (gpsLocation) parts.push(`📍 ${gpsLocation}`)
     parts.push('', 'via @zktruth_channel')
     const text = parts.join('\n')
-    const intent = `https://x.com/intent/tweet?text=${encodeURIComponent(text)}&url=${encodeURIComponent(url)}`
+    // Use X's dedicated `hashtags` param — comma-separated, no `#`
+    // prefixes. X appends them to the tweet composer as tagged
+    // hashtags rather than plain text, so they render as blue
+    // links right away.
+    const hashtags = 'TON,TONblockchain,journalism'
+    const intent = `https://x.com/intent/tweet?text=${encodeURIComponent(text)}&url=${encodeURIComponent(url)}&hashtags=${encodeURIComponent(hashtags)}`
     window.open(intent, '_blank', 'noopener,noreferrer')
   }, [buildProofUrl, proofData, gpsLocation]);
 
