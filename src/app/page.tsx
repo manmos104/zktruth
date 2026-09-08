@@ -3828,15 +3828,57 @@ export default function Home() {
   }, []);
 
   const buildProofUrl = useCallback(() => {
-    const h = proofData?.hash?.slice(0,16) || '0x0000';
-    const t = proofData?.timestamp ? Math.floor(new Date(proofData.timestamp).getTime() / 1000) : '';
-    const l = gpsLocation || '';
-    const p = new URLSearchParams();
-    if (t) p.set('t', String(t));
-    if (l) p.set('l', l);
-    const qs = p.toString();
-    return `https://zktruth.vercel.app/proof/${h}${qs ? '?' + qs : ''}`;
-  }, [proofData, gpsLocation]);
+    // Full 64-char lowercase hex, no 0x prefix — matches the shape the
+    // /proof/[hash] route expects for on-chain lookups and OG meta
+    // generation. Query params (`?t=` etc.) are no longer read by the
+    // server-rendered proof page, so we drop them to keep the URL
+    // short and share-friendly.
+    const raw = proofData?.hash ?? ''
+    const clean = raw.startsWith('0x') || raw.startsWith('0X')
+      ? raw.slice(2)
+      : raw
+    const h = /^[0-9a-fA-F]{64}$/.test(clean) ? clean.toLowerCase() : '0'.repeat(64)
+    return `https://zktruth.vercel.app/proof/${h}`;
+  }, [proofData]);
+
+  /**
+   * "Post to Channel + X" flow. Runs the Telegram channel post FIRST
+   * (via handleShareWithImage, resolved through a ref because it's
+   * declared LATER in this file) so both surfaces carry the capture,
+   * then pops X's tweet composer pre-filled with the /proof URL.
+   *
+   * The X leg is what forces OUR OG card to appear on the tweet —
+   * Telegram's built-in "Share to X" always sends the t.me URL and
+   * hands X Telegram's own card. Going through x.com/intent gives us
+   * control over which URL X scrapes.
+   *
+   * If the channel post fails (network flap, quota) we still open X
+   * so the user isn't left with nothing shared — the /proof URL is
+   * self-contained.
+   */
+  const shareToChannelRef = useRef<(() => Promise<void>) | null>(null);
+  const openXShare = useCallback(async () => {
+    // 1) Fire the Telegram channel post via the ref. Await so the
+    //    /proof page has a `telegramPostUrl` recorded by the time X
+    //    scrapes — that's what gives the Channel row on the proof
+    //    card its real link.
+    const post = shareToChannelRef.current
+    if (post) {
+      try { await post() } catch { /* keep going */ }
+    }
+    // 2) Build the X intent URL and open it.
+    const url = buildProofUrl()
+    const parts: string[] = ['✓ Verified Proof of Capture on TON']
+    const ts = proofData?.timestamp
+      ? proofData.timestamp.replace('T', ' ').replace(/\.\d+/, '').replace('Z', ' UTC')
+      : ''
+    if (ts) parts.push(`⏱ ${ts}`)
+    if (gpsLocation) parts.push(`📍 ${gpsLocation}`)
+    parts.push('', 'via @zktruth_channel')
+    const text = parts.join('\n')
+    const intent = `https://x.com/intent/tweet?text=${encodeURIComponent(text)}&url=${encodeURIComponent(url)}`
+    window.open(intent, '_blank', 'noopener,noreferrer')
+  }, [buildProofUrl, proofData, gpsLocation]);
 
   const handleShareWithImage = useCallback(async () => {
     // Post the capture to the public zkTruth Telegram channel.
@@ -4184,6 +4226,13 @@ export default function Home() {
     tonWallet,
     captureComment,
   ]);
+
+  // Keep the ref pointing at the latest handleShareWithImage so
+  // openXShare (declared earlier in the file for JSX ordering reasons)
+  // can call it without a temporal-dead-zone import problem.
+  useEffect(() => {
+    shareToChannelRef.current = handleShareWithImage
+  }, [handleShareWithImage]);
 
   // === Blur editor plumbing ===================================
   // Whenever the replay modal opens over a photo, prime two canvases:
@@ -5292,6 +5341,25 @@ export default function Home() {
                   }}
                 >
                   POST TO CHANNEL
+                </button>
+                {/* Dedicated X share button. This one bypasses Telegram's
+                    built-in Share-to-X (which always sends the t.me URL
+                    and hands X Telegram's own OG card) by pre-filling
+                    the tweet composer directly with our /proof URL —
+                    X then scrapes that URL and shows the zkTruth
+                    thumbnail + about section as the card. */}
+                <button
+                  className="wid-verify-btn"
+                  onClick={openXShare}
+                  style={{
+                    background: '#000',
+                    backgroundImage: 'none',
+                    color: '#fff',
+                    boxShadow: '0 4px 18px rgba(0,0,0,0.35)',
+                    border: '1px solid rgba(255,255,255,0.18)',
+                  }}
+                >
+                  POST TO CHANNEL + X
                 </button>
                 <button className="wid-gas-btn" onClick={handleCopyLink}>
                   <span>🔗</span> COPY LINK
