@@ -11,6 +11,7 @@ import { useTonConnectUI, useTonWallet } from '@tonconnect/ui-react';
 import { upload } from '@vercel/blob/client';
 import { Address } from '@ton/core';
 import { TrustBadge, type TrustTier as TrustTierType } from './TrustBadge';
+import { PromotionOverlay, TIER_ORDER } from './PromotionOverlay';
 import {
   buildMintTransaction,
   hashHexToBigInt,
@@ -2247,6 +2248,12 @@ export default function Home() {
   } | null>(null);
   const [trustRefreshCount, setTrustRefreshCount] = useState(0);
   const [trustProfileOpen, setTrustProfileOpen] = useState(false);
+  // Tier-up celebration. When the profile modal opens and the current
+  // tier is higher than the last-seen tier saved for this wallet, we
+  // show a full-screen animation (PromotionOverlay) once. Persisted
+  // per-wallet in localStorage so it never fires twice for the same
+  // promotion, even if the user closes and reopens the profile.
+  const [promotion, setPromotion] = useState<{ from: TrustTierType; to: TrustTierType } | null>(null);
   // Weekly leaderboard modal: shows top 50 by ranking score + current
   // reward pool + countdown to next payout. Fetched from /api/leaderboard/current
   // on open.
@@ -2332,6 +2339,26 @@ export default function Home() {
   // SIGN & MINT button can show a spinner and disable itself while
   // the wallet is signing.
   const [minting, setMinting] = useState(false);
+  // Wall-clock ms when the current mint attempt started. Used to
+  // decide when to surface a "Mint sent — continue" escape hatch on
+  // the confirm-tx screen. TON Connect's sendTransaction promise can
+  // hang indefinitely on iOS if the wallet's return-URL back into
+  // the Mini App gets lost (Telegram → Tonkeeper/Gram → Telegram
+  // handoff drops the tonconnect response on some carriers), leaving
+  // the user stuck on "AWAITING WALLET..." even though the mint is
+  // already on-chain. When mintingStartedAt is more than 15s in the
+  // past we show a manual continue button so the user can move on
+  // to the share screen without reloading.
+  const [mintingStartedAt, setMintingStartedAt] = useState<number | null>(null);
+  const [mintTakingLong, setMintTakingLong] = useState(false);
+  // 15-second timer: once the mint has been in-flight this long
+  // without resolving, surface the manual continue escape hatch.
+  useEffect(() => {
+    if (!minting || !mintingStartedAt) { setMintTakingLong(false); return }
+    const remaining = Math.max(0, 15000 - (Date.now() - mintingStartedAt))
+    const t = setTimeout(() => setMintTakingLong(true), remaining)
+    return () => clearTimeout(t)
+  }, [minting, mintingStartedAt]);
   // Blur-brush editor state used inside the replay modal. When
   // blurMode is on, drag gestures on the canvas paint blurred
   // circles over the underlying image (drawn by copying pixels from
@@ -3479,6 +3506,40 @@ export default function Home() {
     }
   }, [tonWallet?.account.address, mintComplete, trustProfileOpen, trustRefreshCount]);
 
+  // Tier-up detection. Runs whenever the profile modal opens with a
+  // fetched trustScore. Compares the current tier against the last-
+  // seen tier persisted per-wallet in localStorage; if it moved UP,
+  // arm the promotion overlay. Baseline: on first-ever open we just
+  // record the tier without celebrating, so a new user doesn't get
+  // hit with a "promoted to Source" firework.
+  useEffect(() => {
+    if (!trustProfileOpen) return
+    if (!trustScore || !tonWallet?.account.address) return
+    // Only celebrate for wallets that have minted — the tier only
+    // becomes meaningful after the first mint unlocks the score.
+    if (!trustScore.hasMinted) return
+    const key = `zk-lastSeenTier-${tonWallet.account.address}`
+    let prev: TrustTierType | null = null
+    try {
+      const raw = localStorage.getItem(key)
+      if (raw && TIER_ORDER.includes(raw as TrustTierType)) {
+        prev = raw as TrustTierType
+      }
+    } catch { /* private browsing — skip */ }
+    const now = trustScore.tier as TrustTierType
+    const nowIdx = TIER_ORDER.indexOf(now)
+    const prevIdx = prev ? TIER_ORDER.indexOf(prev) : -1
+    if (prev && nowIdx > prevIdx) {
+      // Promotion! Show the overlay; onDone will write back the new
+      // tier so it doesn't fire again on the next open.
+      setPromotion({ from: prev, to: now })
+    } else if (!prev) {
+      // First observation for this wallet — record silently so the
+      // very next promotion is what triggers the celebration.
+      try { localStorage.setItem(key, now) } catch { /* skip */ }
+    }
+  }, [trustProfileOpen, trustScore, tonWallet?.account.address]);
+
   // Coordinator callbacks for the real IDKit-backed WorldIdVerifyButton.
   // The widget itself owns the modal + server-verify call; we just react to
   // state transitions to drive the rest of the mint flow.
@@ -3545,6 +3606,8 @@ export default function Home() {
     }
 
     setMinting(true)
+    setMintingStartedAt(Date.now())
+    setMintTakingLong(false)
 
     // 1) Upload the captured media to Vercel Blob under the
     //    deterministic key `captures/<hash>.<ext>` so the NFT metadata
@@ -5247,7 +5310,36 @@ export default function Home() {
               >
                 {minting ? 'AWAITING WALLET...' : `SIGN & MINT · ${TON_GAS_FEE}`}
               </button>
-              <button className="btn-cancel-tx" onClick={() => setScreen("worldid")}>CANCEL</button>
+              <button className="btn-cancel-tx" onClick={() => { setMinting(false); setMintingStartedAt(null); setScreen("worldid") }}>CANCEL</button>
+              {/* Escape hatch: if the wallet handoff dropped the
+                  tonconnect response (Telegram → wallet app → Telegram
+                  return can lose the callback on some carriers), the
+                  mint is already on-chain but the app is still stuck
+                  on AWAITING WALLET. This button lets the user advance
+                  to the share screen once the wallet has signed. Only
+                  appears after 15s so it doesn't tempt people into
+                  bailing before actually signing. */}
+              {minting && mintTakingLong && (
+                <button
+                  className="btn-cancel-tx"
+                  style={{
+                    marginTop: 8,
+                    background: 'rgba(0,200,100,0.12)',
+                    border: '1px solid rgba(0,200,100,0.35)',
+                    color: '#00c864',
+                  }}
+                  onClick={() => {
+                    setMinting(false)
+                    setMintingStartedAt(null)
+                    setMintComplete(true)
+                    setShareStatus('Mint sent to TON — see it on tonviewer soon')
+                    setTimeout(() => setShareStatus(''), 6000)
+                    setScreen('share')
+                  }}
+                >
+                  ALREADY SIGNED? CONTINUE →
+                </button>
+              )}
             </div>
           </div>
         )}
@@ -5587,6 +5679,23 @@ export default function Home() {
             plus the current tier badge. Data is fetched from the KV-
             backed /api/trust/<wallet> endpoint whenever the wallet or
             mintComplete flag changes. */}
+        {trustProfileOpen && promotion && trustScore && tonWallet?.account.address && (
+          <PromotionOverlay
+            fromTier={promotion.from}
+            toTier={promotion.to}
+            score={Math.round(trustScore.score)}
+            onDone={() => {
+              // Persist so the same promotion never fires again.
+              try {
+                localStorage.setItem(
+                  `zk-lastSeenTier-${tonWallet.account.address}`,
+                  promotion.to,
+                )
+              } catch { /* private browsing */ }
+              setPromotion(null)
+            }}
+          />
+        )}
         {trustProfileOpen && (
           <div
             className="privacy-modal-backdrop"
