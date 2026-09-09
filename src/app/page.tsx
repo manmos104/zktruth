@@ -2299,6 +2299,12 @@ export default function Home() {
   const [mintMode, setMintMode] = useState("verified");
   const [snsFromScreen, setSnsFromScreen] = useState("share");
   const [copyStatus, setCopyStatus] = useState("");
+  // "POST TO CHANNEL + X" flow status. We show this on the button
+  // itself so the user sees why nothing is happening while we wait
+  // for the Blob preheat upload to finish — that upload has to be
+  // done BEFORE we hand X the /proof URL or the tweet renders a
+  // blank card.
+  const [xPostingStatus, setXPostingStatus] = useState<'idle' | 'posting'>('idle');
   // Ephemeral toast for the SHARE flow. Renders as a floating message
   // over the wid-share screen so the user knows whether the image
   // attached to the share sheet, whether text landed on the clipboard,
@@ -3858,6 +3864,7 @@ export default function Home() {
    */
   const shareToChannelRef = useRef<(() => Promise<void>) | null>(null);
   const openXShare = useCallback(async () => {
+    setXPostingStatus('posting')
     // 1) Fire the Telegram channel post via the ref. Await so the
     //    /proof page has a `telegramPostUrl` recorded by the time X
     //    scrapes — that's what gives the Channel row on the proof
@@ -3866,6 +3873,26 @@ export default function Home() {
     if (post) {
       try { await post() } catch { /* keep going */ }
     }
+    // 1.5) CRITICAL: wait for the capture to actually land in Vercel
+    //      Blob before we hand X the /proof URL. `generateMetadata`
+    //      on the proof page reads `captures/<hash>.<ext>` from Blob
+    //      to fill og:image — if X's scraper hits us BEFORE the
+    //      preheat upload finishes (very possible on slow cellular),
+    //      the meta tag comes back empty and the tweet renders the
+    //      blank card the user has been seeing.
+    //
+    //      Awaiting the preheat promise here guarantees the Blob is
+    //      live by the time we open the intent. If preheat wasn't
+    //      kicked (e.g. mint completed before this screen loaded and
+    //      the ref got cleared), we just fall through — the /proof
+    //      route still has the tonapi fallback for imageUrl.
+    try {
+      const pre = preheatUploadRef.current
+      if (pre) {
+        await pre.mediaPromise
+        if (pre.posterPromise) { try { await pre.posterPromise } catch {} }
+      }
+    } catch { /* Blob may 4xx; open X anyway */ }
     // 2) Build the X intent URL and open it.
     const url = buildProofUrl()
     const parts: string[] = ['✓ Verified Proof of Capture on TON']
@@ -3883,6 +3910,7 @@ export default function Home() {
     const hashtags = 'TON,TONblockchain,journalism'
     const intent = `https://x.com/intent/tweet?text=${encodeURIComponent(text)}&url=${encodeURIComponent(url)}&hashtags=${encodeURIComponent(hashtags)}`
     window.open(intent, '_blank', 'noopener,noreferrer')
+    setXPostingStatus('idle')
   }, [buildProofUrl, proofData, gpsLocation]);
 
   const handleShareWithImage = useCallback(async () => {
@@ -5356,15 +5384,18 @@ export default function Home() {
                 <button
                   className="wid-verify-btn"
                   onClick={openXShare}
+                  disabled={xPostingStatus === 'posting'}
                   style={{
                     background: '#000',
                     backgroundImage: 'none',
                     color: '#fff',
                     boxShadow: '0 4px 18px rgba(0,0,0,0.35)',
                     border: '1px solid rgba(255,255,255,0.18)',
+                    opacity: xPostingStatus === 'posting' ? 0.6 : 1,
+                    cursor: xPostingStatus === 'posting' ? 'wait' : 'pointer',
                   }}
                 >
-                  POST TO CHANNEL + X
+                  {xPostingStatus === 'posting' ? 'POSTING...' : 'POST TO CHANNEL + X'}
                 </button>
                 <button className="wid-gas-btn" onClick={handleCopyLink}>
                   <span>🔗</span> COPY LINK
