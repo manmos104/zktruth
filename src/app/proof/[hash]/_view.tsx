@@ -351,10 +351,16 @@ body { background: #f6f7fb; }
 }
 .proof-brand-wordmark {
   flex: 1;
+  /* Official wordmark uses Syne Italic Bold — pull the weight up to
+     match the /public/zktruth-logo-green.png lockup exactly. */
   font-family: 'Syne', sans-serif; font-style: italic;
-  font-size: 22px; letter-spacing: -0.5px;
+  font-size: 22px; letter-spacing: -0.6px;
+  font-weight: 800;
+  color: #0d1224;
 }
-.proof-brand-zk { font-weight: 600; color: rgba(13,18,36,0.55); }
+/* Same solid black for both halves — the earlier translucent "zk"
+   read as washed-out next to the crisp "Truth". */
+.proof-brand-zk { font-weight: 800; color: #0d1224; }
 .proof-brand-truth { font-weight: 800; color: #0d1224; }
 .proof-brand-verify {
   font-family: 'JetBrains Mono', monospace;
@@ -387,8 +393,13 @@ body { background: #f6f7fb; }
 .proof-status-icon.status-notFound svg { stroke: #ef4444; }
 
 .proof-status-title {
-  font-family: 'Syne', sans-serif; font-weight: 800;
-  font-size: 26px; letter-spacing: -0.5px;
+  /* Modern geometric sans instead of the Syne italic — Syne is
+     reserved for the brand wordmark up top so the status headline
+     doesn't compete with it visually. Inter 800 with tight tracking
+     reads as crisp and technical. */
+  font-family: 'Inter', system-ui, -apple-system, sans-serif;
+  font-weight: 800; font-style: normal;
+  font-size: 26px; letter-spacing: -0.8px;
   color: #0d1224;
   margin-bottom: 4px; text-align: center;
 }
