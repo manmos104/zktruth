@@ -3509,15 +3509,32 @@ export default function Home() {
   // Tier-up detection. Runs whenever the profile modal opens with a
   // fetched trustScore. Compares the current tier against the last-
   // seen tier persisted per-wallet in localStorage; if it moved UP,
-  // arm the promotion overlay. Baseline: on first-ever open we just
-  // record the tier without celebrating, so a new user doesn't get
-  // hit with a "promoted to Source" firework.
+  // arm the promotion overlay.
+  //
+  // Baseline behavior:
+  //   - No stored value + current tier > Source → RETRO-CELEBRATE
+  //     from Source to current. This covers users who were already
+  //     promoted before we shipped tracking; they still deserve to
+  //     see the animation once.
+  //   - No stored value + current tier == Source → record silently.
+  //   - Stored value + current > stored → fire promotion.
+  //   - Query param `?promoTest=<tier>` forces the overlay to
+  //     Source → <tier> for design QA, regardless of storage.
   useEffect(() => {
     if (!trustProfileOpen) return
     if (!trustScore || !tonWallet?.account.address) return
-    // Only celebrate for wallets that have minted — the tier only
-    // becomes meaningful after the first mint unlocks the score.
     if (!trustScore.hasMinted) return
+
+    // Design QA hook — `?promoTest=Truth-Teller` etc. Force-fires
+    // the animation without touching the persisted last-seen tier.
+    try {
+      const qp = new URLSearchParams(window.location.search).get('promoTest')
+      if (qp && TIER_ORDER.includes(qp as TrustTierType)) {
+        setPromotion({ from: 'Source', to: qp as TrustTierType })
+        return
+      }
+    } catch { /* SSR/no window */ }
+
     const key = `zk-lastSeenTier-${tonWallet.account.address}`
     let prev: TrustTierType | null = null
     try {
@@ -3525,18 +3542,27 @@ export default function Home() {
       if (raw && TIER_ORDER.includes(raw as TrustTierType)) {
         prev = raw as TrustTierType
       }
-    } catch { /* private browsing — skip */ }
+    } catch { /* private browsing */ }
+
     const now = trustScore.tier as TrustTierType
     const nowIdx = TIER_ORDER.indexOf(now)
-    const prevIdx = prev ? TIER_ORDER.indexOf(prev) : -1
-    if (prev && nowIdx > prevIdx) {
-      // Promotion! Show the overlay; onDone will write back the new
-      // tier so it doesn't fire again on the next open.
-      setPromotion({ from: prev, to: now })
-    } else if (!prev) {
-      // First observation for this wallet — record silently so the
-      // very next promotion is what triggers the celebration.
-      try { localStorage.setItem(key, now) } catch { /* skip */ }
+
+    if (prev) {
+      const prevIdx = TIER_ORDER.indexOf(prev)
+      if (nowIdx > prevIdx) {
+        setPromotion({ from: prev, to: now })
+      }
+    } else {
+      // First observation for this wallet.
+      if (nowIdx > 0) {
+        // Retro-celebrate: user was already promoted before we
+        // started tracking. Show the animation once, from Source.
+        setPromotion({ from: 'Source', to: now })
+      } else {
+        // Genuinely at Source — nothing to celebrate; just record
+        // silently so the next real promotion fires the animation.
+        try { localStorage.setItem(key, now) } catch { /* skip */ }
+      }
     }
   }, [trustProfileOpen, trustScore, tonWallet?.account.address]);
 
@@ -5774,6 +5800,36 @@ export default function Home() {
                       }}>
                         {trustScore?.tier ?? 'Source'}
                       </div>
+                      {/* Manual replay of the promotion animation.
+                          Hidden by design (small, subdued) so it feels
+                          like an easter egg, but always available —
+                          users who missed the auto-play (baseline was
+                          recorded before the feature shipped, or they
+                          just want to see it again) can trigger it. */}
+                      {trustScore && trustScore.hasMinted && tier !== 'Source' && (
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            setPromotion({ from: 'Source', to: tier })
+                          }}
+                          style={{
+                            marginTop: 18,
+                            padding: '8px 20px',
+                            background: 'transparent',
+                            border: `1px solid ${tierColor}55`,
+                            borderRadius: 999,
+                            color: tierColor,
+                            fontFamily: 'monospace',
+                            fontSize: 11,
+                            fontWeight: 700,
+                            letterSpacing: 3,
+                            cursor: 'pointer',
+                            textTransform: 'uppercase',
+                          }}
+                        >
+                          ▶ Replay Promotion
+                        </button>
+                      )}
                     </>
                   )
                 })()}
