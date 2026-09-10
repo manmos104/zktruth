@@ -15,7 +15,7 @@
  * it still plays smoothly inside the Telegram Mini App WebView.
  */
 
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { TrustBadge, type TrustTier } from './TrustBadge'
 
 export const TIER_ORDER: TrustTier[] = [
@@ -85,21 +85,23 @@ export function PromotionOverlay({ fromTier, toTier, score, onDone }: Props): Re
     return () => cancelAnimationFrame(raf)
   }, [phase, score])
 
-  // Pre-computed randomised particle geometry so React re-renders
-  // don't reshuffle mid-animation.
-  const confetti = useMemo(() => (
+  // Pre-computed randomised particle geometry frozen at mount via
+  // useState lazy init. `Math.random()` inside useMemo trips React's
+  // hooks-purity rule (impure calls during render); running it once
+  // in useState's initializer is the sanctioned pattern for random
+  // seed data that must not shuffle mid-animation.
+  const [confetti] = useState(() =>
     Array.from({ length: CONFETTI_COUNT }, (_, i) => ({
       id: i,
       x: Math.random() * 100,       // vw
       delay: Math.random() * 900,   // ms
       duration: 2200 + Math.random() * 1800,
-      hue: [color, accent, '#ffffff'][i % 3],
+      hue: (['x', 'y', 'z'] as const)[i % 3], // placeholder, overridden below
       rot: Math.random() * 720 - 360,
       size: 6 + Math.random() * 8,
-    }))
-  ), [color, accent])
-
-  const sparks = useMemo(() => (
+    })),
+  )
+  const [sparks] = useState(() =>
     Array.from({ length: SPARK_COUNT }, (_, i) => {
       const angle = (i / SPARK_COUNT) * Math.PI * 2
       const dist = 180 + Math.random() * 120
@@ -108,17 +110,14 @@ export function PromotionOverlay({ fromTier, toTier, score, onDone }: Props): Re
         dx: Math.cos(angle) * dist,
         dy: Math.sin(angle) * dist,
         delay: Math.random() * 120,
-        hue: i % 3 === 0 ? '#ffffff' : color,
+        useAccent: i % 3 === 0, // resolved to a colour at render time
       }
-    })
-  ), [color])
-
-  const rays = useMemo(() => (
-    Array.from({ length: RAY_COUNT }, (_, i) => ({
-      id: i,
-      rot: (i / RAY_COUNT) * 360,
-    }))
-  ), [])
+    }),
+  )
+  const rays = Array.from({ length: RAY_COUNT }, (_, i) => ({
+    id: i,
+    rot: (i / RAY_COUNT) * 360,
+  }))
 
   return (
     <div
@@ -287,39 +286,51 @@ export function PromotionOverlay({ fromTier, toTier, score, onDone }: Props): Re
             animation: `zkPromoShockwave 1300ms cubic-bezier(0.2,0.8,0.3,1) ${800 + delay}ms both`,
           }} />
         ))}
-        {sparks.map((s) => (
-          <div key={s.id} style={{
-            position: 'absolute',
-            left: 0,
-            top: 0,
-            width: 8,
-            height: 8,
-            borderRadius: 8,
-            background: s.hue,
-            boxShadow: `0 0 12px ${s.hue}, 0 0 22px ${s.hue}66`,
-            ['--dx' as string]: `${s.dx}px`,
-            ['--dy' as string]: `${s.dy}px`,
-            animation: `zkPromoSpark 1400ms cubic-bezier(0.15,0.75,0.35,1) ${900 + s.delay}ms both`,
-          } as React.CSSProperties} />
-        ))}
+        {sparks.map((s) => {
+          // Resolve at render time so a colour change (unlikely but
+          // possible if props ever animated) doesn't need to reshuffle
+          // the pre-computed spark geometry.
+          const hue = s.useAccent ? '#ffffff' : color
+          return (
+            <div key={s.id} style={{
+              position: 'absolute',
+              left: 0,
+              top: 0,
+              width: 8,
+              height: 8,
+              borderRadius: 8,
+              background: hue,
+              boxShadow: `0 0 12px ${hue}, 0 0 22px ${hue}66`,
+              ['--dx' as string]: `${s.dx}px`,
+              ['--dy' as string]: `${s.dy}px`,
+              animation: `zkPromoSpark 1400ms cubic-bezier(0.15,0.75,0.35,1) ${900 + s.delay}ms both`,
+            } as React.CSSProperties} />
+          )
+        })}
       </div>
 
       {/* Confetti falling from the top edge */}
       <div style={{ position: 'absolute', inset: 0, pointerEvents: 'none', overflow: 'hidden' }}>
-        {confetti.map((c) => (
-          <div key={c.id} style={{
-            position: 'absolute',
-            top: 0,
-            left: `${c.x}vw`,
-            width: c.size,
-            height: c.size * 0.4,
-            background: c.hue,
-            borderRadius: 2,
-            boxShadow: `0 0 6px ${c.hue}88`,
-            ['--rot' as string]: `${c.rot}deg`,
-            animation: `zkPromoConfetti ${c.duration}ms cubic-bezier(0.4,0.05,0.3,1) ${900 + c.delay}ms both`,
-          } as React.CSSProperties} />
-        ))}
+        {confetti.map((c, idx) => {
+          // Rotate the palette across the 3 base colours so the storm
+          // reads as branded rather than monochrome.
+          const palette = [color, accent, '#ffffff']
+          const hue = palette[idx % 3]
+          return (
+            <div key={c.id} style={{
+              position: 'absolute',
+              top: 0,
+              left: `${c.x}vw`,
+              width: c.size,
+              height: c.size * 0.4,
+              background: hue,
+              borderRadius: 2,
+              boxShadow: `0 0 6px ${hue}88`,
+              ['--rot' as string]: `${c.rot}deg`,
+              animation: `zkPromoConfetti ${c.duration}ms cubic-bezier(0.4,0.05,0.3,1) ${900 + c.delay}ms both`,
+            } as React.CSSProperties} />
+          )
+        })}
       </div>
 
       {/* "PROMOTED" small label above the new badge */}

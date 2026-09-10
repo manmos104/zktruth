@@ -5993,7 +5993,7 @@ export default function Home() {
                 }}>
                   Score = posts × 1 + mints × 10 + reactions × 5, with
                   time decay. Requires ≥1 mint to unlock — free posts
-                  alone won't accrue.
+                  alone won&apos;t accrue.
                   <div style={{ marginTop: 10, display: 'grid', gap: 6 }}>
                     {([
                       { tier: 'Source' as const,                 range: '0–99',       col: '#8b8b8b' },
