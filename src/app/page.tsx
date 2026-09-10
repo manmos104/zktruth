@@ -3522,27 +3522,20 @@ export default function Home() {
     } catch { /* SSR */ }
   }, []);
 
-  // Tier-up detection. Runs whenever the profile modal opens with a
-  // fetched trustScore. Compares the current tier against the last-
-  // seen tier persisted per-wallet in localStorage; if it moved UP,
-  // arm the promotion overlay.
-  //
-  // Baseline behavior:
-  //   - No stored value + current tier > Source → RETRO-CELEBRATE
-  //     from Source to current. This covers users who were already
-  //     promoted before we shipped tracking; they still deserve to
-  //     see the animation once.
-  //   - No stored value + current tier == Source → record silently.
-  //   - Stored value + current > stored → fire promotion.
-  //   - Query param `?promoTest=<tier>` forces the overlay to
-  //     Source → <tier> for design QA, regardless of storage.
+  // Tier-up detection. Runs GLOBALLY on every trustScore update — no
+  // longer gated on the profile modal being open. That means:
+  //   - App reload with a promoted tier not yet celebrated → fires
+  //     the animation on startup.
+  //   - Mint completes → trust score refetch → tier up detected →
+  //     animation fires immediately, before the user does anything.
+  //   - No stored last-seen tier + current > Source → retro-celebrate
+  //     once, from Source, so users already promoted before we
+  //     shipped tracking still get their moment.
+  //   - Query param `?promoTest=<tier>` forces the animation.
   useEffect(() => {
-    if (!trustProfileOpen) return
     if (!trustScore || !tonWallet?.account.address) return
     if (!trustScore.hasMinted) return
 
-    // Design QA hook — `?promoTest=Truth-Teller` etc. Force-fires
-    // the animation without touching the persisted last-seen tier.
     try {
       const qp = new URLSearchParams(window.location.search).get('promoTest')
       if (qp && TIER_ORDER.includes(qp as TrustTierType)) {
@@ -3569,18 +3562,13 @@ export default function Home() {
         setPromotion({ from: prev, to: now })
       }
     } else {
-      // First observation for this wallet.
       if (nowIdx > 0) {
-        // Retro-celebrate: user was already promoted before we
-        // started tracking. Show the animation once, from Source.
         setPromotion({ from: 'Source', to: now })
       } else {
-        // Genuinely at Source — nothing to celebrate; just record
-        // silently so the next real promotion fires the animation.
         try { localStorage.setItem(key, now) } catch { /* skip */ }
       }
     }
-  }, [trustProfileOpen, trustScore, tonWallet?.account.address]);
+  }, [trustScore, tonWallet?.account.address]);
 
   // Coordinator callbacks for the real IDKit-backed WorldIdVerifyButton.
   // The widget itself owns the modal + server-verify call; we just react to
