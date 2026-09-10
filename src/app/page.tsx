@@ -3506,11 +3506,34 @@ export default function Home() {
     }
   }, [tonWallet?.account.address, mintComplete, trustProfileOpen, trustRefreshCount]);
 
-  // Demo trigger: `?promoDemo=1` or `?promoDemo=<tier>` on any page
-  // load fires the animation immediately, no wallet or profile modal
-  // required. Handy for previewing the effect on the desktop web
-  // build where the Trust Score chip is hidden without a connected
-  // wallet. Runs once on mount.
+  // TEMPORARY VERIFICATION TRIGGER — fires the promotion animation
+  // once per browser session on Mini App startup, no gates, no
+  // conditions. This is here so we can visually confirm the effect
+  // renders correctly inside the Telegram WebView, which has quirks
+  // Safari doesn't (Telegram overrides history, viewport, and touch
+  // handling). Guarded by sessionStorage so it only fires once per
+  // open — closing and reopening the Mini App will replay it, but
+  // navigating around inside won't.
+  //
+  // Once the user confirms the effect works, this block should be
+  // replaced with the real tier-up detection (already wired below).
+  useEffect(() => {
+    try {
+      const flag = 'zk-promo-verify-shown'
+      if (sessionStorage.getItem(flag)) return
+      sessionStorage.setItem(flag, '1')
+      // Small delay so it fires after the splash screen finishes.
+      const t = setTimeout(() => {
+        setPromotion({ from: 'Source', to: 'Truth-Teller' })
+      }, 500)
+      return () => clearTimeout(t)
+    } catch { /* private browsing */ }
+  }, []);
+
+  // Demo trigger: `?promoDemo=<tier>` on any URL fires the animation
+  // immediately. Coexists with the verification trigger above so the
+  // Telegram start_param path (t.me/bot/app?startapp=promoDemo=…) can
+  // also drive the preview.
   useEffect(() => {
     try {
       const qp = new URLSearchParams(window.location.search).get('promoDemo')
