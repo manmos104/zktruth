@@ -5705,18 +5705,22 @@ export default function Home() {
             plus the current tier badge. Data is fetched from the KV-
             backed /api/trust/<wallet> endpoint whenever the wallet or
             mintComplete flag changes. */}
-        {trustProfileOpen && promotion && trustScore && tonWallet?.account.address && (
+        {promotion && (
           <PromotionOverlay
             fromTier={promotion.from}
             toTier={promotion.to}
-            score={Math.round(trustScore.score)}
+            score={trustScore ? Math.round(trustScore.score) : 0}
             onDone={() => {
-              // Persist so the same promotion never fires again.
+              // Persist so the same promotion never fires again for
+              // this wallet. Only writes when we actually have a
+              // wallet address; the manual "Play Promotion Animation"
+              // preview from Source tier should not overwrite the
+              // real progression, so skip the write in that case.
               try {
-                localStorage.setItem(
-                  `zk-lastSeenTier-${tonWallet.account.address}`,
-                  promotion.to,
-                )
+                const addr = tonWallet?.account.address
+                if (addr && promotion.from !== 'Source') {
+                  localStorage.setItem(`zk-lastSeenTier-${addr}`, promotion.to)
+                }
               } catch { /* private browsing */ }
               setPromotion(null)
             }}
@@ -5806,30 +5810,36 @@ export default function Home() {
                           users who missed the auto-play (baseline was
                           recorded before the feature shipped, or they
                           just want to see it again) can trigger it. */}
-                      {trustScore && trustScore.hasMinted && tier !== 'Source' && (
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation()
-                            setPromotion({ from: 'Source', to: tier })
-                          }}
-                          style={{
-                            marginTop: 18,
-                            padding: '8px 20px',
-                            background: 'transparent',
-                            border: `1px solid ${tierColor}55`,
-                            borderRadius: 999,
-                            color: tierColor,
-                            fontFamily: 'monospace',
-                            fontSize: 11,
-                            fontWeight: 700,
-                            letterSpacing: 3,
-                            cursor: 'pointer',
-                            textTransform: 'uppercase',
-                          }}
-                        >
-                          ▶ Replay Promotion
-                        </button>
-                      )}
+                      {/* ALWAYS render — even for Source tier — with
+                          a fallback demo target of Truth-Teller so we
+                          have a reliable way to preview the animation.
+                          Previously gated on hasMinted + non-Source
+                          which hid the button for users still on the
+                          baseline tier. */}
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          const target = tier !== 'Source' ? tier : ('Truth-Teller' as TrustTierType)
+                          setPromotion({ from: 'Source', to: target })
+                        }}
+                        style={{
+                          marginTop: 18,
+                          padding: '10px 24px',
+                          background: `${tierColor}22`,
+                          border: `1.5px solid ${tierColor}`,
+                          borderRadius: 999,
+                          color: tierColor,
+                          fontFamily: 'monospace',
+                          fontSize: 12,
+                          fontWeight: 800,
+                          letterSpacing: 3,
+                          cursor: 'pointer',
+                          textTransform: 'uppercase',
+                          boxShadow: `0 0 20px ${tierColor}55`,
+                        }}
+                      >
+                        ▶ Play Promotion Animation
+                      </button>
                     </>
                   )
                 })()}
