@@ -3506,6 +3506,22 @@ export default function Home() {
     }
   }, [tonWallet?.account.address, mintComplete, trustProfileOpen, trustRefreshCount]);
 
+  // Demo trigger: `?promoDemo=1` or `?promoDemo=<tier>` on any page
+  // load fires the animation immediately, no wallet or profile modal
+  // required. Handy for previewing the effect on the desktop web
+  // build where the Trust Score chip is hidden without a connected
+  // wallet. Runs once on mount.
+  useEffect(() => {
+    try {
+      const qp = new URLSearchParams(window.location.search).get('promoDemo')
+      if (!qp) return
+      const target: TrustTierType = TIER_ORDER.includes(qp as TrustTierType)
+        ? (qp as TrustTierType)
+        : 'Truth-Teller'
+      setPromotion({ from: 'Source', to: target })
+    } catch { /* SSR */ }
+  }, []);
+
   // Tier-up detection. Runs whenever the profile modal opens with a
   // fetched trustScore. Compares the current tier against the last-
   // seen tier persisted per-wallet in localStorage; if it moved UP,
