@@ -126,7 +126,11 @@ export function PromotionOverlay({ fromTier, toTier, score, onDone }: Props): Re
       style={{
         position: 'fixed',
         inset: 0,
-        zIndex: 2000,
+        // Must be above `.privacy-modal-backdrop` (z-index 10005) so
+        // the celebration paints on top of the profile modal — the
+        // whole point of the effect. Was 2000 initially and the
+        // modal completely covered it.
+        zIndex: 20000,
         background: `radial-gradient(circle at 50% 45%, ${color}33 0%, ${color}0d 30%, #000000f2 65%, #000000f7 100%)`,
         display: 'flex',
         flexDirection: 'column',
