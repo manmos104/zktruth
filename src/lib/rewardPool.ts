@@ -27,10 +27,14 @@ import { getRedis } from './trustStore'
  * Payouts happen on Monday 00:00 UTC for the PREVIOUS ISO week.
  */
 
-export const TREASURY_SHARE = 0.15
-export const REWARD_POOL_SHARE = 0.85
-// Absolute TON that gets added to the pool per mint. Mirrors the
-// contract's SERVICE_FEE - TREASURY_SHARE * SERVICE_FEE math.
+// BOOTSTRAP PHASE — 100 % of the service fee goes to the weekly
+// reward pool. The founder explicitly opted out of an operations
+// cut for the low-user-count launch window; all fees flow straight
+// to the top-3 winners so the incentive to compete is maximised.
+// Bump TREASURY_SHARE back up once the user base is large enough
+// that ops costs (Vercel / Blob / RPC) need covering from the fees.
+export const TREASURY_SHARE = 0.00
+export const REWARD_POOL_SHARE = 1.00
 export const SERVICE_FEE_TON = 0.10
 export const POOL_CONTRIBUTION_PER_MINT = SERVICE_FEE_TON * REWARD_POOL_SHARE
 
@@ -113,26 +117,28 @@ export async function getEpoch(epochId: string): Promise<EpochRecord | null> {
   return (await r.get<EpochRecord>(`epoch:${epochId}`)) ?? null
 }
 
-// Top-100 累進 payout schedule. Ratios sum to 100 %.
-//   #1        20 %
-//   #2-3      10 % each  (20 % total)
-//   #4-10      4 % each  (28 % total)
-//   #11-25     1 % each  (15 % total)
-//   #26-50     0.4 % each (10 % total)
-//   #51-100    0.14 % each ( 7 % total)
-// Top-heavy so competition stays sharp, but the whole top 100 gets
-// paid so casual users still feel rewarded for participation.
+// BOOTSTRAP PHASE payout schedule — top 3 only, 60 / 30 / 10.
+//
+// Rationale (see also the founder's incentive-design note): with a
+// 10-20 user base the old top-100 curve would pay every participant
+// a token amount and destroy the incentive to actually compete. A
+// tight top-3 makes 1st place feel meaningful ($10-15 at current
+// TON prices), 2nd and 3rd still visible enough to chase.
+//
+// Ratios sum to 100 %. Ranks 4+ get 0 — they compete for tier badges
+// and next week's slot instead.
 export function payoutShareForRank(rank: number): number {
-  if (rank === 1) return 0.20
-  if (rank >= 2 && rank <= 3) return 0.10
-  if (rank >= 4 && rank <= 10) return 0.04
-  if (rank >= 11 && rank <= 25) return 0.01
-  if (rank >= 26 && rank <= 50) return 0.004
-  if (rank >= 51 && rank <= 100) return 0.0014
+  if (rank === 1) return 0.60
+  if (rank === 2) return 0.30
+  if (rank === 3) return 0.10
   return 0
 }
 
-// Convenience for the leaderboard / close-epoch endpoints — how many
-// wallets we bother scoring for the payout. Change here + payout
-// schedule to grow / shrink the recipient pool.
-export const LEADERBOARD_SIZE = 100
+export const LEADERBOARD_SIZE = 3
+
+// Quality gate for the weekly top-3 payout. A wallet is only eligible
+// for a payout if they minted at least this many verified proofs in
+// the epoch. Blocks "one big mint on Sunday night" from stealing a
+// slot from someone who actually worked all week, and gives the
+// weekly rhythm some substance without needing full Sybil defence.
+export const MIN_MINTS_FOR_PAYOUT = 3

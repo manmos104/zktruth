@@ -7,10 +7,16 @@ import {
 import {
   currentEpochId,
   getEpoch,
-  LEADERBOARD_SIZE,
+  MIN_MINTS_FOR_PAYOUT,
   nextEpochStartMs,
   payoutShareForRank,
 } from '@/lib/rewardPool'
+
+// Show more than 3 rows in the leaderboard UI even though only the
+// top 3 (among wallets that meet the mint quality gate) actually get
+// paid. Displaying 20 lets users see themselves and the wallets
+// ahead of them so they know what they're chasing.
+const LEADERBOARD_DISPLAY_SIZE = 20
 
 /**
  * GET /api/leaderboard/current
@@ -38,6 +44,10 @@ interface LeaderboardRow {
   weeklyReactions: number
   payoutShare: number
   payoutTon: number
+  /** True when the wallet has enough mints to qualify for the payout. */
+  eligibleForPayout: boolean
+  /** 1-indexed position AMONG eligible wallets (null if not eligible). */
+  payoutRank: number | null
 }
 
 export async function GET() {
@@ -53,6 +63,8 @@ export async function GET() {
         poolTon: epoch?.poolTon ?? 0,
         mintCount: epoch?.mintCount ?? 0,
         nextPayoutMs: nextEpochStartMs(),
+        minMintsForPayout: MIN_MINTS_FOR_PAYOUT,
+        payoutSlots: 3,
         rows: [],
       }, { headers: { 'Cache-Control': 'public, max-age=30, s-maxage=30' } })
     }
@@ -68,15 +80,22 @@ export async function GET() {
     // Sort desc by rankingScore. Ties broken by allTime score.
     scored.sort((a, b) => b.b.rankingScore - a.b.rankingScore || b.b.score - a.b.score)
 
-    const top = scored.slice(0, LEADERBOARD_SIZE)
+    const top = scored.slice(0, LEADERBOARD_DISPLAY_SIZE)
     const epoch = await getEpoch(currentEpochId())
     const poolTon = epoch?.poolTon ?? 0
 
+    // Assign payoutRank separately from the display rank. The display
+    // rank comes from rankingScore only (visible top-N). The payout
+    // rank is computed among wallets that clear the mint quality gate
+    // — a wallet ranked #4 overall can still be paid if the wallets
+    // ahead of them didn't mint enough this week.
+    let nextPayoutRank = 1
     const rows: LeaderboardRow[] = top.map((entry, i) => {
-      const rank = i + 1
-      const share = payoutShareForRank(rank)
+      const eligible = entry.b.weeklyMints >= MIN_MINTS_FOR_PAYOUT
+      const payoutRank = eligible ? nextPayoutRank++ : null
+      const share = payoutRank != null ? payoutShareForRank(payoutRank) : 0
       return {
-        rank,
+        rank: i + 1,
         wallet: entry.user.wallet,
         rankingScore: entry.b.rankingScore,
         allTimeScore: entry.b.score,
@@ -87,6 +106,8 @@ export async function GET() {
         weeklyReactions: entry.b.weeklyReactions,
         payoutShare: share,
         payoutTon: Math.round(poolTon * share * 1000) / 1000,
+        eligibleForPayout: eligible,
+        payoutRank,
       }
     })
 
@@ -96,6 +117,8 @@ export async function GET() {
         poolTon,
         mintCount: epoch?.mintCount ?? 0,
         nextPayoutMs: nextEpochStartMs(),
+        minMintsForPayout: MIN_MINTS_FOR_PAYOUT,
+        payoutSlots: 3,
         rows,
       },
       { headers: { 'Cache-Control': 'public, max-age=30, s-maxage=30' } },

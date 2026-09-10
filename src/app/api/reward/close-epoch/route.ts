@@ -8,6 +8,7 @@ import {
   epochIdFrom,
   getEpoch,
   LEADERBOARD_SIZE,
+  MIN_MINTS_FOR_PAYOUT,
   payoutShareForRank,
 } from '@/lib/rewardPool'
 
@@ -54,8 +55,15 @@ async function doClose() {
       ? (await r.mget<UserRecord[]>(...keys)).filter((x): x is UserRecord => !!x && !!x.wallet)
       : []
     const now = Date.now()
+    // Score everyone, then filter by the min-mints quality gate BEFORE
+    // ranking. Wallets under MIN_MINTS_FOR_PAYOUT don't take a top-3
+    // slot from someone who actually mints regularly — they just
+    // don't qualify this epoch. Their score is preserved (they still
+    // build tier / all-time score), so this only affects the weekly
+    // payout, not progression.
     const scored = records
       .map((u) => ({ user: u, b: computeScore(u, now) }))
+      .filter((entry) => entry.b.weeklyMints >= MIN_MINTS_FOR_PAYOUT)
       .sort((a, b) => b.b.rankingScore - a.b.rankingScore || b.b.score - a.b.score)
       .slice(0, LEADERBOARD_SIZE)
 
@@ -66,6 +74,7 @@ async function doClose() {
         rank,
         wallet: entry.user.wallet,
         rankingScore: entry.b.rankingScore,
+        weeklyMints: entry.b.weeklyMints,
         payoutShare: share,
         payoutTon: Math.round(poolTon * share * 1000) / 1000,
       }

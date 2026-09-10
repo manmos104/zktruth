@@ -2275,7 +2275,11 @@ export default function Home() {
       weeklyReactions: number
       payoutShare: number
       payoutTon: number
+      eligibleForPayout?: boolean
+      payoutRank?: number | null
     }>
+    minMintsForPayout?: number
+    payoutSlots?: number
   } | null>(null);
   useEffect(() => {
     if (!leaderboardOpen) return
@@ -5618,6 +5622,26 @@ export default function Home() {
                     </div>
                   )
                 })()}
+                {/* Rules banner. Explicit so users understand why some
+                    high-ranked wallets aren't getting paid — the mint
+                    gate is intentional and visible. */}
+                <div style={{
+                  marginTop: 14,
+                  padding: '10px 14px',
+                  background: 'rgba(255,215,0,0.08)',
+                  border: '1px solid rgba(255,215,0,0.28)',
+                  borderRadius: 10,
+                  fontSize: 12,
+                  color: '#e6d78a',
+                  lineHeight: 1.5,
+                  fontFamily: 'monospace',
+                  fontWeight: 600,
+                  letterSpacing: 0.5,
+                }}>
+                  TOP 3 SPLIT · 60% / 30% / 10%
+                  <br />
+                  Requires ≥ {leaderboard?.minMintsForPayout ?? 3} verified mints this week
+                </div>
               </div>
               <div style={{
                 overflowY: 'auto',
@@ -5641,7 +5665,15 @@ export default function Home() {
                         }).toLowerCase()
                       } catch { return '' }
                     })()
-                  const medal = row.rank === 1 ? '🥇' : row.rank === 2 ? '🥈' : row.rank === 3 ? '🥉' : null
+                  // Medal is now tied to the PAYOUT rank (top-3 among
+                  // wallets that clear the mint quality gate), not the
+                  // raw display rank. A wallet at overall #4 that
+                  // qualifies while wallets ahead of them didn't can
+                  // still hold a medal.
+                  const pRank = row.payoutRank ?? null
+                  const medal = pRank === 1 ? '🥇' : pRank === 2 ? '🥈' : pRank === 3 ? '🥉' : null
+                  const paid = row.eligibleForPayout && row.payoutTon > 0
+                  const gateShort = leaderboard?.minMintsForPayout ?? 3
                   return (
                     <div
                       key={row.wallet}
@@ -5654,6 +5686,7 @@ export default function Home() {
                         background: isMe ? 'rgba(255,215,0,0.14)' : 'rgba(255,255,255,0.05)',
                         border: isMe ? '1.5px solid rgba(255,215,0,0.5)' : '1px solid rgba(255,255,255,0.08)',
                         marginBottom: 8,
+                        opacity: !row.eligibleForPayout ? 0.72 : 1,
                       }}
                     >
                       <div style={{
@@ -5661,8 +5694,8 @@ export default function Home() {
                         textAlign: 'center',
                         fontFamily: 'monospace',
                         fontWeight: 800,
-                        color: row.rank <= 3 ? '#ffd700' : '#e0e0e0',
-                        fontSize: row.rank <= 3 ? 26 : 18,
+                        color: medal ? '#ffd700' : '#e0e0e0',
+                        fontSize: medal ? 26 : 18,
                       }}>
                         {medal ?? `#${row.rank}`}
                       </div>
@@ -5681,7 +5714,9 @@ export default function Home() {
                           {isMe && <span style={{ color: '#ffd700', marginLeft: 8, fontWeight: 800 }}>(YOU)</span>}
                         </div>
                         <div style={{ fontSize: 12, color: '#bbb', marginTop: 4, fontFamily: 'monospace' }}>
-                          <span style={{ color: '#ffd700' }}>{row.weeklyMints}m</span>
+                          <span style={{ color: row.weeklyMints >= gateShort ? '#ffd700' : '#ff8080' }}>
+                            {row.weeklyMints}m
+                          </span>
                           {' · '}
                           <span style={{ color: '#e0e0e0' }}>{row.weeklyReactions}r</span>
                           {' · '}
@@ -5689,18 +5724,38 @@ export default function Home() {
                         </div>
                       </div>
                       <div style={{ textAlign: 'right' }}>
-                        <div style={{
-                          fontFamily: 'monospace',
-                          fontSize: 18,
-                          fontWeight: 800,
-                          color: '#00ff87',
-                          textShadow: '0 0 8px rgba(0,255,135,0.3)',
-                        }}>
-                          {row.payoutTon.toFixed(3)}
-                        </div>
-                        <div style={{ fontSize: 11, color: '#aaa', fontFamily: 'monospace', fontWeight: 600, marginTop: 2 }}>
-                          TON · score {Math.round(row.rankingScore)}
-                        </div>
+                        {paid ? (
+                          <>
+                            <div style={{
+                              fontFamily: 'monospace',
+                              fontSize: 18,
+                              fontWeight: 800,
+                              color: '#00ff87',
+                              textShadow: '0 0 8px rgba(0,255,135,0.3)',
+                            }}>
+                              {row.payoutTon.toFixed(3)}
+                            </div>
+                            <div style={{ fontSize: 11, color: '#aaa', fontFamily: 'monospace', fontWeight: 600, marginTop: 2 }}>
+                              TON · score {Math.round(row.rankingScore)}
+                            </div>
+                          </>
+                        ) : (
+                          <>
+                            <div style={{
+                              fontFamily: 'monospace',
+                              fontSize: 12,
+                              fontWeight: 700,
+                              color: '#ff8080',
+                              lineHeight: 1.3,
+                              maxWidth: 110,
+                            }}>
+                              NEED {gateShort - row.weeklyMints} MORE MINT{(gateShort - row.weeklyMints) === 1 ? '' : 'S'}
+                            </div>
+                            <div style={{ fontSize: 11, color: '#777', fontFamily: 'monospace', fontWeight: 600, marginTop: 4 }}>
+                              score {Math.round(row.rankingScore)}
+                            </div>
+                          </>
+                        )}
                       </div>
                     </div>
                   )
