@@ -70,6 +70,65 @@ export function PromotionOverlay({ fromTier, toTier, score, onDone }: Props): Re
     return () => { clearTimeout(t1); clearTimeout(t2); clearTimeout(t3); clearTimeout(t4) }
   }, [])
 
+  // Sparkle SFX. Synthesised on the fly with Web Audio so we don't
+  // ship an mp3. A "chime" cluster at 900ms (matching the shockwave
+  // burst) followed by a shimmery tail that trails through the badge
+  // reveal. Wrapped in try/catch — if the browser blocks autoplay or
+  // there's no AudioContext, the animation still runs silently.
+  useEffect(() => {
+    let ctx: AudioContext | null = null
+    try {
+      const AC = (window.AudioContext ??
+        (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext)
+      if (!AC) return
+      ctx = new AC()
+      const master = ctx.createGain()
+      master.gain.value = 0.22
+      master.connect(ctx.destination)
+
+      // Helper: one bell-like sine chirp with fast exponential decay.
+      const chirp = (freq: number, when: number, duration: number, gain = 1) => {
+        const c = ctx!
+        const t0 = c.currentTime + when
+        const osc = c.createOscillator()
+        osc.type = 'sine'
+        osc.frequency.setValueAtTime(freq, t0)
+        // Slight downward glide gives the chime a "bell" character
+        // rather than a flat beep.
+        osc.frequency.exponentialRampToValueAtTime(freq * 0.7, t0 + duration)
+        const g = c.createGain()
+        g.gain.setValueAtTime(0.0001, t0)
+        g.gain.exponentialRampToValueAtTime(gain, t0 + 0.008)
+        g.gain.exponentialRampToValueAtTime(0.0001, t0 + duration)
+        osc.connect(g)
+        g.connect(master)
+        osc.start(t0)
+        osc.stop(t0 + duration + 0.05)
+      }
+
+      // 1) Rising chime cluster synced with the shockwave burst.
+      const bell = [1568, 1975, 2637, 3136] // G6 · B6 · E7 · G7
+      bell.forEach((f, i) => chirp(f, 0.85 + i * 0.06, 0.9, 0.9))
+
+      // 2) A big anchor chime at the new-badge arrival.
+      chirp(2093, 1.7, 1.4, 1.0)  // C7
+      chirp(2637, 1.7, 1.4, 0.7)  // E7 harmonic
+
+      // 3) Sparkle tail — random high pings that scatter over the
+      //    badge reveal, giving that "glittering" feel.
+      for (let i = 0; i < 14; i++) {
+        const t = 1.9 + Math.random() * 1.6
+        const f = 2000 + Math.random() * 2200
+        chirp(f, t, 0.35 + Math.random() * 0.2, 0.35)
+      }
+    } catch {
+      // Autoplay blocked or Web Audio unavailable — silent fallback.
+    }
+    return () => {
+      try { ctx?.close() } catch { /* already closed */ }
+    }
+  }, [])
+
   useEffect(() => {
     if (phase < 3) return
     const start = performance.now()
@@ -242,7 +301,7 @@ export function PromotionOverlay({ fromTier, toTier, score, onDone }: Props): Re
       <div style={{
         position: 'absolute',
         inset: 0,
-        background: 'radial-gradient(circle at 50% 45%, #ffffffee 0%, #ffffff00 40%)',
+        background: 'radial-gradient(circle at 50% 50%, #ffffffee 0%, #ffffff00 40%)',
         animation: 'zkPromoBigFlash 700ms ease-out 800ms both',
         pointerEvents: 'none',
       }} />
@@ -252,7 +311,7 @@ export function PromotionOverlay({ fromTier, toTier, score, onDone }: Props): Re
         aria-hidden
         style={{
           position: 'absolute',
-          top: '45%',
+          top: '50%',
           left: '50%',
           transform: 'translate(-50%,-50%)',
           animation: 'zkPromoOldOut 900ms cubic-bezier(0.7,0,0.9,0.3) both',
@@ -266,7 +325,7 @@ export function PromotionOverlay({ fromTier, toTier, score, onDone }: Props): Re
       {/* Shockwave rings + sparks — pinned to the badge's centre */}
       <div style={{
         position: 'absolute',
-        top: '45%',
+        top: '50%',
         left: '50%',
         width: 0,
         height: 0,
@@ -358,7 +417,7 @@ export function PromotionOverlay({ fromTier, toTier, score, onDone }: Props): Re
       {phase >= 2 && (
         <div style={{
           position: 'absolute',
-          top: '45%',
+          top: '50%',
           left: '50%',
           transform: 'translate(-50%,-50%)',
           animation: phase >= 4
