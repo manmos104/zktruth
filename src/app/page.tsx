@@ -3510,30 +3510,6 @@ export default function Home() {
     }
   }, [tonWallet?.account.address, mintComplete, trustProfileOpen, trustRefreshCount]);
 
-  // TEMPORARY VERIFICATION TRIGGER — fires the promotion animation
-  // once per browser session on Mini App startup, no gates, no
-  // conditions. This is here so we can visually confirm the effect
-  // renders correctly inside the Telegram WebView, which has quirks
-  // Safari doesn't (Telegram overrides history, viewport, and touch
-  // handling). Guarded by sessionStorage so it only fires once per
-  // open — closing and reopening the Mini App will replay it, but
-  // navigating around inside won't.
-  //
-  // Once the user confirms the effect works, this block should be
-  // replaced with the real tier-up detection (already wired below).
-  useEffect(() => {
-    try {
-      const flag = 'zk-promo-verify-shown'
-      if (sessionStorage.getItem(flag)) return
-      sessionStorage.setItem(flag, '1')
-      // Small delay so it fires after the splash screen finishes.
-      const t = setTimeout(() => {
-        setPromotion({ from: 'Source', to: 'Truth-Teller' })
-      }, 500)
-      return () => clearTimeout(t)
-    } catch { /* private browsing */ }
-  }, []);
-
   // Demo trigger: `?promoDemo=<tier>` on any URL fires the animation
   // immediately. Coexists with the verification trigger above so the
   // Telegram start_param path (t.me/bot/app?startapp=promoDemo=…) can
@@ -5787,20 +5763,27 @@ export default function Home() {
             plus the current tier badge. Data is fetched from the KV-
             backed /api/trust/<wallet> endpoint whenever the wallet or
             mintComplete flag changes. */}
-        {promotion && (
+        {/* Only fire the overlay on the main camera screen, after
+            splash has finished, and never over the profile/leaderboard
+            modals. That way a tier-up detected while the profile is
+            open queues the animation for the next time the user is
+            on the camera screen — matches the "one moment of glory,
+            in the right place" spec, not "spam every screen". */}
+        {promotion && screen === 'camera' && splashPhase >= 4
+          && !trustProfileOpen && !leaderboardOpen && (
           <PromotionOverlay
             fromTier={promotion.from}
             toTier={promotion.to}
             score={trustScore ? Math.round(trustScore.score) : 0}
             onDone={() => {
-              // Persist so the same promotion never fires again for
-              // this wallet. Only writes when we actually have a
-              // wallet address; the manual "Play Promotion Animation"
-              // preview from Source tier should not overwrite the
-              // real progression, so skip the write in that case.
+              // Persist the destination tier so the same promotion
+              // (or retro-celebrate) never fires again for this
+              // wallet. Manual REPLAY from the profile will just
+              // rewrite the same value it already stores, so no
+              // harm done.
               try {
                 const addr = tonWallet?.account.address
-                if (addr && promotion.from !== 'Source') {
+                if (addr) {
                   localStorage.setItem(`zk-lastSeenTier-${addr}`, promotion.to)
                 }
               } catch { /* private browsing */ }
