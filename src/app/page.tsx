@@ -3547,7 +3547,7 @@ export default function Home() {
       }
     } catch { /* SSR/no window */ }
 
-    const key = `zk-lastSeenTier-${tonWallet.account.address}`
+    const key = `zk-lastSeenTier-v2-${tonWallet.account.address}`
     let prev: TrustTierType | null = null
     try {
       const raw = localStorage.getItem(key)
@@ -5784,7 +5784,7 @@ export default function Home() {
               try {
                 const addr = tonWallet?.account.address
                 if (addr) {
-                  localStorage.setItem(`zk-lastSeenTier-${addr}`, promotion.to)
+                  localStorage.setItem(`zk-lastSeenTier-v2-${addr}`, promotion.to)
                 }
               } catch { /* private browsing */ }
               setPromotion(null)

@@ -70,65 +70,6 @@ export function PromotionOverlay({ fromTier, toTier, score, onDone }: Props): Re
     return () => { clearTimeout(t1); clearTimeout(t2); clearTimeout(t3); clearTimeout(t4) }
   }, [])
 
-  // Sparkle SFX. Synthesised on the fly with Web Audio so we don't
-  // ship an mp3. A "chime" cluster at 900ms (matching the shockwave
-  // burst) followed by a shimmery tail that trails through the badge
-  // reveal. Wrapped in try/catch — if the browser blocks autoplay or
-  // there's no AudioContext, the animation still runs silently.
-  useEffect(() => {
-    let ctx: AudioContext | null = null
-    try {
-      const AC = (window.AudioContext ??
-        (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext)
-      if (!AC) return
-      ctx = new AC()
-      const master = ctx.createGain()
-      master.gain.value = 0.22
-      master.connect(ctx.destination)
-
-      // Helper: one bell-like sine chirp with fast exponential decay.
-      const chirp = (freq: number, when: number, duration: number, gain = 1) => {
-        const c = ctx!
-        const t0 = c.currentTime + when
-        const osc = c.createOscillator()
-        osc.type = 'sine'
-        osc.frequency.setValueAtTime(freq, t0)
-        // Slight downward glide gives the chime a "bell" character
-        // rather than a flat beep.
-        osc.frequency.exponentialRampToValueAtTime(freq * 0.7, t0 + duration)
-        const g = c.createGain()
-        g.gain.setValueAtTime(0.0001, t0)
-        g.gain.exponentialRampToValueAtTime(gain, t0 + 0.008)
-        g.gain.exponentialRampToValueAtTime(0.0001, t0 + duration)
-        osc.connect(g)
-        g.connect(master)
-        osc.start(t0)
-        osc.stop(t0 + duration + 0.05)
-      }
-
-      // 1) Rising chime cluster synced with the shockwave burst.
-      const bell = [1568, 1975, 2637, 3136] // G6 · B6 · E7 · G7
-      bell.forEach((f, i) => chirp(f, 0.85 + i * 0.06, 0.9, 0.9))
-
-      // 2) A big anchor chime at the new-badge arrival.
-      chirp(2093, 1.7, 1.4, 1.0)  // C7
-      chirp(2637, 1.7, 1.4, 0.7)  // E7 harmonic
-
-      // 3) Sparkle tail — random high pings that scatter over the
-      //    badge reveal, giving that "glittering" feel.
-      for (let i = 0; i < 14; i++) {
-        const t = 1.9 + Math.random() * 1.6
-        const f = 2000 + Math.random() * 2200
-        chirp(f, t, 0.35 + Math.random() * 0.2, 0.35)
-      }
-    } catch {
-      // Autoplay blocked or Web Audio unavailable — silent fallback.
-    }
-    return () => {
-      try { ctx?.close() } catch { /* already closed */ }
-    }
-  }, [])
-
   useEffect(() => {
     if (phase < 3) return
     const start = performance.now()
@@ -413,55 +354,60 @@ export function PromotionOverlay({ fromTier, toTier, score, onDone }: Props): Re
         </div>
       )}
 
-      {/* New badge rises in */}
+      {/* New badge + tier name + score, grouped in a single centered
+          column so the visual weight of the whole composition sits
+          on the vertical midline of the viewport. Previously the
+          badge was pinned at 50 % and the text at 73 %, which made
+          the badge look off-centre because the label / score below
+          were pulling the perceived weight downward. */}
       {phase >= 2 && (
         <div style={{
           position: 'absolute',
           top: '50%',
           left: '50%',
           transform: 'translate(-50%,-50%)',
-          animation: phase >= 4
-            ? 'zkPromoNewIdle 3600ms ease-in-out infinite'
-            : 'zkPromoNewIn 1400ms cubic-bezier(0.2,0.9,0.3,1.1) both',
-          filter: `drop-shadow(0 0 24px ${color}bb) drop-shadow(0 0 60px ${color}55)`,
-          pointerEvents: 'none',
-        }}>
-          <TrustBadge tier={toTier} size={220} />
-        </div>
-      )}
-
-      {/* Tier name + score under the badge */}
-      {phase >= 3 && (
-        <div style={{
-          position: 'absolute',
-          top: '73%',
-          left: 0,
-          right: 0,
-          textAlign: 'center',
+          display: 'flex',
+          flexDirection: 'column',
+          alignItems: 'center',
+          justifyContent: 'center',
+          gap: 18,
           pointerEvents: 'none',
         }}>
           <div style={{
-            fontSize: 26,
-            fontWeight: 900,
-            letterSpacing: 4,
-            color,
-            textTransform: 'uppercase',
-            textShadow: `0 0 20px ${color}cc, 0 0 40px ${color}88`,
-            animation: 'zkPromoTextIn 700ms cubic-bezier(0.2,0.9,0.3,1) 200ms both',
+            animation: phase >= 4
+              ? 'zkPromoNewIdle 3600ms ease-in-out infinite'
+              : 'zkPromoNewIn 1400ms cubic-bezier(0.2,0.9,0.3,1.1) both',
+            filter: `drop-shadow(0 0 24px ${color}bb) drop-shadow(0 0 60px ${color}55)`,
           }}>
-            {toTier}
+            <TrustBadge tier={toTier} size={220} />
           </div>
-          <div style={{
-            marginTop: 14,
-            fontFamily: 'monospace',
-            fontSize: 42,
-            fontWeight: 800,
-            color: '#ffffff',
-            textShadow: `0 0 16px ${color}cc`,
-            animation: 'zkPromoTextIn 700ms cubic-bezier(0.2,0.9,0.3,1) 400ms both',
-          }}>
-            {displayScore}
-          </div>
+          {phase >= 3 && (
+            <>
+              <div style={{
+                fontSize: 26,
+                fontWeight: 900,
+                letterSpacing: 4,
+                color,
+                textTransform: 'uppercase',
+                textShadow: `0 0 20px ${color}cc, 0 0 40px ${color}88`,
+                animation: 'zkPromoTextIn 700ms cubic-bezier(0.2,0.9,0.3,1) 200ms both',
+                textAlign: 'center',
+              }}>
+                {toTier}
+              </div>
+              <div style={{
+                fontFamily: 'monospace',
+                fontSize: 42,
+                fontWeight: 800,
+                color: '#ffffff',
+                textShadow: `0 0 16px ${color}cc`,
+                animation: 'zkPromoTextIn 700ms cubic-bezier(0.2,0.9,0.3,1) 400ms both',
+                textAlign: 'center',
+              }}>
+                {displayScore}
+              </div>
+            </>
+          )}
         </div>
       )}
 
