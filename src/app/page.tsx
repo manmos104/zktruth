@@ -3959,37 +3959,43 @@ export default function Home() {
    * self-contained.
    */
   const shareToChannelRef = useRef<(() => Promise<void>) | null>(null);
-  const openXShare = useCallback(async () => {
+
+  /**
+   * Multi-platform channel + external social broadcast.
+   *
+   * Runs the Telegram channel post first (so the /proof page has a
+   * `telegramPostUrl` recorded by the time any scraper hits us), waits
+   * for the Blob preheat to land the capture on the CDN (so the
+   * og:image tag renders correctly), then opens each requested social
+   * composer pre-filled with the /proof URL.
+   *
+   * Opening multiple composers from one gesture is fine inside the
+   * Telegram Mini App WebView (Telegram.WebApp.openLink() bypasses
+   * the browser's popup blocker), but in a regular browser only the
+   * first `window.open` typically survives. On mobile Telegram this
+   * gives us reliable cross-post; on desktop web we may need the
+   * user to allow popups — acceptable trade-off for the MVP.
+   */
+  const openMultiShare = useCallback(async (
+    platforms: Array<'x' | 'farcaster' | 'truth'>,
+  ) => {
     setXPostingStatus('posting')
-    // 1) Fire the Telegram channel post via the ref. Await so the
-    //    /proof page has a `telegramPostUrl` recorded by the time X
-    //    scrapes — that's what gives the Channel row on the proof
-    //    card its real link.
+    // 1) Channel post.
     const post = shareToChannelRef.current
     if (post) {
       try { await post() } catch { /* keep going */ }
     }
-    // 1.5) CRITICAL: wait for the capture to actually land in Vercel
-    //      Blob before we hand X the /proof URL. `generateMetadata`
-    //      on the proof page reads `captures/<hash>.<ext>` from Blob
-    //      to fill og:image — if X's scraper hits us BEFORE the
-    //      preheat upload finishes (very possible on slow cellular),
-    //      the meta tag comes back empty and the tweet renders the
-    //      blank card the user has been seeing.
-    //
-    //      Awaiting the preheat promise here guarantees the Blob is
-    //      live by the time we open the intent. If preheat wasn't
-    //      kicked (e.g. mint completed before this screen loaded and
-    //      the ref got cleared), we just fall through — the /proof
-    //      route still has the tonapi fallback for imageUrl.
+    // 2) Wait for Blob upload — required for og:image.
     try {
       const pre = preheatUploadRef.current
       if (pre) {
         await pre.mediaPromise
         if (pre.posterPromise) { try { await pre.posterPromise } catch {} }
       }
-    } catch { /* Blob may 4xx; open X anyway */ }
-    // 2) Build the X intent URL and open it.
+    } catch { /* fallthrough */ }
+
+    // 3) Build the shared text body once — same message across
+    //    every platform so screenshots read identically.
     const url = buildProofUrl()
     const parts: string[] = ['✅ Verified Proof of Capture on TON']
     const ts = proofData?.timestamp
@@ -3998,16 +4004,58 @@ export default function Home() {
     if (ts) parts.push(`⏱ ${ts}`)
     if (gpsLocation) parts.push(`📍 ${gpsLocation}`)
     parts.push('', 'via @zktruth_channel')
-    const text = parts.join('\n')
-    // Use X's dedicated `hashtags` param — comma-separated, no `#`
-    // prefixes. X appends them to the tweet composer as tagged
-    // hashtags rather than plain text, so they render as blue
-    // links right away.
-    const hashtags = 'TON,TONblockchain,journalism'
-    const intent = `https://x.com/intent/tweet?text=${encodeURIComponent(text)}&url=${encodeURIComponent(url)}&hashtags=${encodeURIComponent(hashtags)}`
-    window.open(intent, '_blank', 'noopener,noreferrer')
+    const baseText = parts.join('\n')
+    const hashtagsCsv = 'TON,TONblockchain,journalism'
+    // Farcaster / Truth Social don't take a separate hashtags param
+    // like X does, so embed them inline in the body for those
+    // platforms.
+    const textWithHashtags = `${baseText}\n\n#TON #TONblockchain #journalism`
+
+    // 4) Intent URL builders per platform.
+    const intentFor = (p: 'x' | 'farcaster' | 'truth'): string => {
+      if (p === 'x') {
+        // X's dedicated hashtags param renders them as tagged links.
+        return `https://x.com/intent/tweet?text=${encodeURIComponent(baseText)}&url=${encodeURIComponent(url)}&hashtags=${encodeURIComponent(hashtagsCsv)}`
+      }
+      if (p === 'farcaster') {
+        // Warpcast compose intent. embeds[] renders the URL as a
+        // rich card underneath the cast.
+        return `https://warpcast.com/~/compose?text=${encodeURIComponent(textWithHashtags)}&embeds%5B%5D=${encodeURIComponent(url)}`
+      }
+      // Truth Social (Mastodon-fork share endpoint).
+      return `https://truthsocial.com/share?text=${encodeURIComponent(`${textWithHashtags}\n\n${url}`)}`
+    }
+
+    // 5) Open each composer. Small stagger avoids the WebView
+    //    coalescing them into one blocked popup.
+    // Telegram.WebApp.openLink is the mobile-friendly path — falls
+    // back to window.open for the web build.
+    const tg = (window as unknown as {
+      Telegram?: { WebApp?: { openLink?: (u: string) => void } }
+    }).Telegram?.WebApp
+    const openOne = (u: string) => {
+      if (tg?.openLink) {
+        try { tg.openLink(u); return } catch { /* fallthrough */ }
+      }
+      window.open(u, '_blank', 'noopener,noreferrer')
+    }
+    for (let i = 0; i < platforms.length; i++) {
+      const p = platforms[i]
+      const link = intentFor(p)
+      // Stagger by 250 ms so mobile WebViews queue them cleanly.
+      setTimeout(() => openOne(link), i * 250)
+    }
     setXPostingStatus('idle')
   }, [buildProofUrl, proofData, gpsLocation]);
+
+  // Legacy single-target aliases so existing buttons keep working.
+  const openXShare = useCallback(() => openMultiShare(['x']), [openMultiShare])
+  const openFarcasterShare = useCallback(() => openMultiShare(['farcaster']), [openMultiShare])
+  const openTruthShare = useCallback(() => openMultiShare(['truth']), [openMultiShare])
+  const openAllSocials = useCallback(
+    () => openMultiShare(['x', 'farcaster', 'truth']),
+    [openMultiShare],
+  )
 
   const handleShareWithImage = useCallback(async () => {
     // Post the capture to the public zkTruth Telegram channel.
@@ -5521,6 +5569,65 @@ export default function Home() {
                   }}
                 >
                   {xPostingStatus === 'posting' ? 'POSTING...' : 'POST TO CHANNEL + X'}
+                </button>
+                {/* Farcaster (Warpcast) broadcast. Purple mirrors the
+                    Warpcast brand so users recognise the destination
+                    at a glance. */}
+                <button
+                  className="wid-verify-btn"
+                  onClick={openFarcasterShare}
+                  disabled={xPostingStatus === 'posting'}
+                  style={{
+                    background: '#7C65C1',
+                    backgroundImage: 'none',
+                    color: '#fff',
+                    boxShadow: '0 4px 18px rgba(124,101,193,0.4)',
+                    border: '1px solid rgba(255,255,255,0.18)',
+                    opacity: xPostingStatus === 'posting' ? 0.6 : 1,
+                    cursor: xPostingStatus === 'posting' ? 'wait' : 'pointer',
+                  }}
+                >
+                  {xPostingStatus === 'posting' ? 'POSTING...' : 'POST TO CHANNEL + FARCASTER'}
+                </button>
+                {/* Truth Social broadcast. Uses the platform's red
+                    accent. */}
+                <button
+                  className="wid-verify-btn"
+                  onClick={openTruthShare}
+                  disabled={xPostingStatus === 'posting'}
+                  style={{
+                    background: '#B02F2F',
+                    backgroundImage: 'none',
+                    color: '#fff',
+                    boxShadow: '0 4px 18px rgba(176,47,47,0.4)',
+                    border: '1px solid rgba(255,255,255,0.18)',
+                    opacity: xPostingStatus === 'posting' ? 0.6 : 1,
+                    cursor: xPostingStatus === 'posting' ? 'wait' : 'pointer',
+                  }}
+                >
+                  {xPostingStatus === 'posting' ? 'POSTING...' : 'POST TO CHANNEL + TRUTH SOCIAL'}
+                </button>
+                {/* Fan-out to all three externals in one gesture.
+                    Gold gradient so it visually pops as the "power"
+                    action. Composer windows open in sequence with a
+                    250 ms stagger so mobile WebViews don't coalesce
+                    them into a single blocked popup. */}
+                <button
+                  className="wid-verify-btn"
+                  onClick={openAllSocials}
+                  disabled={xPostingStatus === 'posting'}
+                  style={{
+                    background: 'linear-gradient(135deg,#ffcf5c 0%,#ff7a4d 50%,#B02F2F 100%)',
+                    backgroundImage: 'linear-gradient(135deg,#ffcf5c 0%,#ff7a4d 50%,#B02F2F 100%)',
+                    color: '#fff',
+                    boxShadow: '0 4px 22px rgba(255,207,92,0.45)',
+                    border: '1px solid rgba(255,255,255,0.28)',
+                    opacity: xPostingStatus === 'posting' ? 0.6 : 1,
+                    cursor: xPostingStatus === 'posting' ? 'wait' : 'pointer',
+                    fontWeight: 900,
+                  }}
+                >
+                  {xPostingStatus === 'posting' ? 'POSTING...' : '🚀 POST TO ALL (X + FARCASTER + TRUTH)'}
                 </button>
                 <button className="wid-gas-btn" onClick={handleCopyLink}>
                   <span>🔗</span> COPY LINK
