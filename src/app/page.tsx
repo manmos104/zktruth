@@ -4141,14 +4141,111 @@ export default function Home() {
     setPendingShareQueue((q) => q.filter((x) => x !== p))
   }, [buildProofUrl, proofData, gpsLocation]);
 
-  // Legacy single-target aliases so existing buttons keep working.
+  // Legacy alias: X share is still coupled with the Telegram
+  // channel post (the whole point of the X leg is to force our own
+  // OG card onto the tweet, and that requires the /proof page to
+  // have a live telegramPostUrl to link to when scraped).
   const openXShare = useCallback(() => openMultiShare(['x']), [openMultiShare])
-  const openFarcasterShare = useCallback(() => openMultiShare(['farcaster']), [openMultiShare])
-  const openTruthShare = useCallback(() => openMultiShare(['truth']), [openMultiShare])
-  const openAllSocials = useCallback(
-    () => openMultiShare(['x', 'farcaster', 'truth']),
-    [openMultiShare],
-  )
+
+  /**
+   * Robust clipboard write. `navigator.clipboard.writeText` is the
+   * happy path, but it's frequently unavailable inside the Telegram
+   * Mini App WebView (permission not granted, or the API is missing
+   * on older iOS Telegram builds). The `<textarea>` + execCommand
+   * dance is the historic fallback that still works in every
+   * WebView we ship into.
+   */
+  const robustCopy = useCallback(async (text: string): Promise<boolean> => {
+    try {
+      await navigator.clipboard.writeText(text)
+      return true
+    } catch { /* fall through */ }
+    try {
+      const ta = document.createElement('textarea')
+      ta.value = text
+      ta.setAttribute('readonly', '')
+      ta.style.position = 'fixed'
+      ta.style.top = '0'
+      ta.style.left = '0'
+      ta.style.opacity = '0'
+      document.body.appendChild(ta)
+      ta.focus()
+      ta.select()
+      ta.setSelectionRange(0, text.length)
+      const ok = document.execCommand('copy')
+      document.body.removeChild(ta)
+      return ok
+    } catch { return false }
+  }, []);
+
+  /**
+   * Standalone Farcaster share. Does NOT hit the Telegram channel —
+   * the user asked for these two platforms to be pure single-target
+   * broadcasts so their timelines don't get triple-posted. Copies
+   * the full paste-ready message to the clipboard as a backup for
+   * when Warpcast's compose intent redirects to the login gate.
+   */
+  const openFarcasterShare = useCallback(async () => {
+    const url = buildProofUrl()
+    const parts: string[] = ['✅ Verified Proof of Capture on TON']
+    const ts = proofData?.timestamp
+      ? proofData.timestamp.replace('T', ' ').replace(/\.\d+/, '').replace('Z', ' UTC')
+      : ''
+    if (ts) parts.push(`⏱ ${ts}`)
+    if (gpsLocation) parts.push(`📍 ${gpsLocation}`)
+    parts.push('', 'via @zktruth_channel')
+    const baseText = parts.join('\n')
+    const textWithHashtags = `${baseText}\n\n#TON #TONblockchain #journalism`
+    const intent = `https://warpcast.com/~/compose?text=${encodeURIComponent(textWithHashtags)}&embeds%5B%5D=${encodeURIComponent(url)}`
+    await robustCopy(`${textWithHashtags}\n\n${url}`)
+    setCopyStatus('Post text copied — paste into Warpcast if needed')
+    setTimeout(() => setCopyStatus(''), 8000)
+    const tg = (window as unknown as {
+      Telegram?: { WebApp?: { openLink?: (u: string) => void } }
+    }).Telegram?.WebApp
+    if (tg?.openLink) {
+      try { tg.openLink(intent); return } catch { /* fall through */ }
+    }
+    window.open(intent, '_blank', 'noopener,noreferrer')
+  }, [buildProofUrl, proofData, gpsLocation, robustCopy]);
+
+  /**
+   * Standalone Truth Social share. Truth Social has no public share
+   * intent URL, so the entire flow is:
+   *   1. Copy the post body (with hashtags + /proof link) to the
+   *      clipboard using the fallback-chain writer.
+   *   2. Open truthsocial.com — the composer sits pinned at the top
+   *      of the home feed once the user is signed in, so paste +
+   *      submit finishes the post.
+   *   3. Show a persistent copy-status hint so the user knows the
+   *      clipboard has their message.
+   */
+  const openTruthShare = useCallback(async () => {
+    const url = buildProofUrl()
+    const parts: string[] = ['✅ Verified Proof of Capture on TON']
+    const ts = proofData?.timestamp
+      ? proofData.timestamp.replace('T', ' ').replace(/\.\d+/, '').replace('Z', ' UTC')
+      : ''
+    if (ts) parts.push(`⏱ ${ts}`)
+    if (gpsLocation) parts.push(`📍 ${gpsLocation}`)
+    parts.push('', 'via @zktruth_channel')
+    const baseText = parts.join('\n')
+    const textWithHashtags = `${baseText}\n\n#TON #TONblockchain #journalism`
+    const payload = `${textWithHashtags}\n\n${url}`
+    const ok = await robustCopy(payload)
+    setCopyStatus(ok
+      ? '✅ Post text copied — paste into Truth Social composer'
+      : 'Text: ' + payload.slice(0, 60) + '…')
+    setTimeout(() => setCopyStatus(''), 10000)
+    const tg = (window as unknown as {
+      Telegram?: { WebApp?: { openLink?: (u: string) => void } }
+    }).Telegram?.WebApp
+    const target = 'https://truthsocial.com/'
+    if (tg?.openLink) {
+      try { tg.openLink(target); return } catch { /* fall through */ }
+    }
+    window.open(target, '_blank', 'noopener,noreferrer')
+  }, [buildProofUrl, proofData, gpsLocation, robustCopy]);
 
   const handleShareWithImage = useCallback(async () => {
     // Post the capture to the public zkTruth Telegram channel.
@@ -5663,125 +5760,41 @@ export default function Home() {
                 >
                   {xPostingStatus === 'posting' ? 'POSTING...' : 'POST TO CHANNEL + X'}
                 </button>
-                {/* Farcaster (Warpcast) broadcast. Purple mirrors the
-                    Warpcast brand so users recognise the destination
-                    at a glance. */}
+                {/* Standalone Farcaster (Warpcast) broadcast. Does
+                    NOT hit the Telegram channel — this is a single-
+                    target share so the user's Telegram followers
+                    don't get double-notified when they've also
+                    already crossed the /proof URL over. */}
                 <button
                   className="wid-verify-btn"
                   onClick={openFarcasterShare}
-                  disabled={xPostingStatus === 'posting'}
                   style={{
                     background: '#7C65C1',
                     backgroundImage: 'none',
                     color: '#fff',
                     boxShadow: '0 4px 18px rgba(124,101,193,0.4)',
                     border: '1px solid rgba(255,255,255,0.18)',
-                    opacity: xPostingStatus === 'posting' ? 0.6 : 1,
-                    cursor: xPostingStatus === 'posting' ? 'wait' : 'pointer',
                   }}
                 >
-                  {xPostingStatus === 'posting' ? 'POSTING...' : 'POST TO CHANNEL + FARCASTER'}
+                  POST TO FARCASTER
                 </button>
-                {/* Truth Social broadcast. Uses the platform's red
-                    accent. */}
+                {/* Standalone Truth Social broadcast. Same single-
+                    target rationale. Uses robust clipboard write +
+                    home-feed composer as the paste target because
+                    Truth Social has no public compose intent URL. */}
                 <button
                   className="wid-verify-btn"
                   onClick={openTruthShare}
-                  disabled={xPostingStatus === 'posting'}
                   style={{
                     background: '#B02F2F',
                     backgroundImage: 'none',
                     color: '#fff',
                     boxShadow: '0 4px 18px rgba(176,47,47,0.4)',
                     border: '1px solid rgba(255,255,255,0.18)',
-                    opacity: xPostingStatus === 'posting' ? 0.6 : 1,
-                    cursor: xPostingStatus === 'posting' ? 'wait' : 'pointer',
                   }}
                 >
-                  {xPostingStatus === 'posting' ? 'POSTING...' : 'POST TO CHANNEL + TRUTH SOCIAL'}
+                  POST TO TRUTH SOCIAL
                 </button>
-                {/* Fan-out to all three externals in one gesture.
-                    Gold gradient so it visually pops as the "power"
-                    action. Composer windows open in sequence with a
-                    250 ms stagger so mobile WebViews don't coalesce
-                    them into a single blocked popup. */}
-                <button
-                  className="wid-verify-btn"
-                  onClick={openAllSocials}
-                  disabled={xPostingStatus === 'posting'}
-                  style={{
-                    background: 'linear-gradient(135deg,#ffcf5c 0%,#ff7a4d 50%,#B02F2F 100%)',
-                    backgroundImage: 'linear-gradient(135deg,#ffcf5c 0%,#ff7a4d 50%,#B02F2F 100%)',
-                    color: '#fff',
-                    boxShadow: '0 4px 22px rgba(255,207,92,0.45)',
-                    border: '1px solid rgba(255,255,255,0.28)',
-                    opacity: xPostingStatus === 'posting' ? 0.6 : 1,
-                    cursor: xPostingStatus === 'posting' ? 'wait' : 'pointer',
-                    fontWeight: 900,
-                  }}
-                >
-                  {xPostingStatus === 'posting' ? 'POSTING...' : '🚀 POST TO ALL (X + FARCASTER + TRUTH)'}
-                </button>
-                {/* Queue for the multi-platform fan-out. Whatever
-                    platforms didn't fit into the original gesture
-                    frame show up here as individual next-tap
-                    buttons. Each tap opens that composer in a
-                    fresh gesture — reliable across mobile WebViews
-                    where a single window.open followed by a
-                    setTimeout window.open gets popup-blocked. */}
-                {pendingShareQueue.length > 0 && (
-                  <div style={{
-                    marginTop: 4,
-                    padding: '10px 12px',
-                    border: '1px dashed rgba(255,255,255,0.28)',
-                    borderRadius: 12,
-                    background: 'rgba(255,255,255,0.04)',
-                  }}>
-                    <div style={{
-                      fontSize: 11,
-                      letterSpacing: 3,
-                      color: '#ffffff99',
-                      fontFamily: 'monospace',
-                      fontWeight: 700,
-                      textAlign: 'center',
-                      marginBottom: 8,
-                    }}>
-                      NEXT — TAP TO OPEN
-                    </div>
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                      {pendingShareQueue.includes('farcaster') && (
-                        <button
-                          className="wid-verify-btn"
-                          onClick={() => openQueuedPlatform('farcaster')}
-                          style={{
-                            background: '#7C65C1',
-                            backgroundImage: 'none',
-                            color: '#fff',
-                            boxShadow: '0 4px 14px rgba(124,101,193,0.4)',
-                            border: '1px solid rgba(255,255,255,0.18)',
-                          }}
-                        >
-                          → OPEN FARCASTER
-                        </button>
-                      )}
-                      {pendingShareQueue.includes('truth') && (
-                        <button
-                          className="wid-verify-btn"
-                          onClick={() => openQueuedPlatform('truth')}
-                          style={{
-                            background: '#B02F2F',
-                            backgroundImage: 'none',
-                            color: '#fff',
-                            boxShadow: '0 4px 14px rgba(176,47,47,0.4)',
-                            border: '1px solid rgba(255,255,255,0.18)',
-                          }}
-                        >
-                          → OPEN TRUTH SOCIAL
-                        </button>
-                      )}
-                    </div>
-                  </div>
-                )}
                 <button className="wid-gas-btn" onClick={handleCopyLink}>
                   <span>🔗</span> COPY LINK
                 </button>
