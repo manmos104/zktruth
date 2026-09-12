@@ -4000,9 +4000,16 @@ export default function Home() {
     } catch { /* fallthrough */ }
 
     // 3) Build the shared text body once — same message across
-    //    every platform so screenshots read identically.
+    //    every platform so screenshots read identically. The
+    //    opening headline switches based on whether the capture
+    //    has been minted so we don't falsely claim "Verified Proof
+    //    of Capture on TON" for a free (unminted) post — that
+    //    claim requires an actual NFT on-chain.
     const url = buildProofUrl()
-    const parts: string[] = ['✅ Verified Proof of Capture on TON']
+    const headline = mintComplete
+      ? '✅ Verified Proof of Capture on TON'
+      : '📸 Fresh capture via zkTruth'
+    const parts: string[] = [headline]
     const ts = proofData?.timestamp
       ? proofData.timestamp.replace('T', ' ').replace(/\.\d+/, '').replace('Z', ' UTC')
       : ''
@@ -4098,7 +4105,7 @@ export default function Home() {
     const rest = platforms.slice(1)
     setPendingShareQueue(rest)
     setXPostingStatus('idle')
-  }, [buildProofUrl, proofData, gpsLocation]);
+  }, [buildProofUrl, proofData, gpsLocation, mintComplete]);
 
   // Follow-up handler for the queued platforms. Each button in the
   // "→ NEXT" strip calls this, giving each open its own user
@@ -4187,7 +4194,13 @@ export default function Home() {
    */
   const openFarcasterShare = useCallback(async () => {
     const url = buildProofUrl()
-    const parts: string[] = ['✅ Verified Proof of Capture on TON']
+    // Free (unminted) posts get a different headline so we don't
+    // falsely claim "Verified Proof of Capture on TON" — that's the
+    // paid-mint promise, not the free-share one.
+    const headline = mintComplete
+      ? '✅ Verified Proof of Capture on TON'
+      : '📸 Fresh capture via zkTruth'
+    const parts: string[] = [headline]
     const ts = proofData?.timestamp
       ? proofData.timestamp.replace('T', ' ').replace(/\.\d+/, '').replace('Z', ' UTC')
       : ''
@@ -4207,7 +4220,7 @@ export default function Home() {
       try { tg.openLink(intent); return } catch { /* fall through */ }
     }
     window.open(intent, '_blank', 'noopener,noreferrer')
-  }, [buildProofUrl, proofData, gpsLocation, robustCopy]);
+  }, [buildProofUrl, proofData, gpsLocation, robustCopy, mintComplete]);
 
 
   const handleShareWithImage = useCallback(async () => {
