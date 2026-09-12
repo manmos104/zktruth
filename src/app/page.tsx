@@ -3991,7 +3991,7 @@ export default function Home() {
     } catch { /* Blob may 4xx; open X anyway */ }
     // 2) Build the X intent URL and open it.
     const url = buildProofUrl()
-    const parts: string[] = ['✓ Verified Proof of Capture on TON']
+    const parts: string[] = ['✅ Verified Proof of Capture on TON']
     const ts = proofData?.timestamp
       ? proofData.timestamp.replace('T', ' ').replace(/\.\d+/, '').replace('Z', ' UTC')
       : ''
