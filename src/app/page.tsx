@@ -4012,24 +4012,42 @@ export default function Home() {
     const textWithHashtags = `${baseText}\n\n#TON #TONblockchain #journalism`
 
     // 4) Intent URL builders per platform.
-    const intentFor = (p: 'x' | 'farcaster' | 'truth'): string => {
+    //    Farcaster and Truth Social don't reliably accept a
+    //    pre-filled compose intent the way X does — Warpcast's
+    //    compose URL works only inside an authenticated session,
+    //    and Truth Social has no public share endpoint at all.
+    //    Fallback: copy the full message to the clipboard AND open
+    //    the site's compose surface, so the user can just paste.
+    const intentFor = (p: 'x' | 'farcaster' | 'truth'): {
+      url: string
+      copyPayload?: string
+    } => {
       if (p === 'x') {
-        // X's dedicated hashtags param renders them as tagged links.
-        return `https://x.com/intent/tweet?text=${encodeURIComponent(baseText)}&url=${encodeURIComponent(url)}&hashtags=${encodeURIComponent(hashtagsCsv)}`
+        return {
+          url: `https://x.com/intent/tweet?text=${encodeURIComponent(baseText)}&url=${encodeURIComponent(url)}&hashtags=${encodeURIComponent(hashtagsCsv)}`,
+        }
       }
       if (p === 'farcaster') {
-        // Warpcast compose intent. embeds[] renders the URL as a
-        // rich card underneath the cast.
-        return `https://warpcast.com/~/compose?text=${encodeURIComponent(textWithHashtags)}&embeds%5B%5D=${encodeURIComponent(url)}`
+        // Warpcast compose intent (works if the user is signed in
+        // to warpcast.com in the browser that opens the link).
+        // Provide the same text on the clipboard so the paste
+        // path still works when the deep link goes to login.
+        return {
+          url: `https://warpcast.com/~/compose?text=${encodeURIComponent(textWithHashtags)}&embeds%5B%5D=${encodeURIComponent(url)}`,
+          copyPayload: `${textWithHashtags}\n\n${url}`,
+        }
       }
-      // Truth Social (Mastodon-fork share endpoint).
-      return `https://truthsocial.com/share?text=${encodeURIComponent(`${textWithHashtags}\n\n${url}`)}`
+      // Truth Social — no share intent, so we send the user to the
+      // home feed (which has the composer on top) and rely on
+      // clipboard paste for the message body.
+      return {
+        url: 'https://truthsocial.com/',
+        copyPayload: `${textWithHashtags}\n\n${url}`,
+      }
     }
 
     // 5) Open each composer. Small stagger avoids the WebView
     //    coalescing them into one blocked popup.
-    // Telegram.WebApp.openLink is the mobile-friendly path — falls
-    // back to window.open for the web build.
     const tg = (window as unknown as {
       Telegram?: { WebApp?: { openLink?: (u: string) => void } }
     }).Telegram?.WebApp
@@ -4039,10 +4057,27 @@ export default function Home() {
       }
       window.open(u, '_blank', 'noopener,noreferrer')
     }
+
+    // Copy the clipboard payload for the LAST platform in the list —
+    // whichever composer opens on top is what the user will paste
+    // into. If multiple platforms need pasteable content, we prefer
+    // the "richer" one (Truth Social > Farcaster) since X already
+    // pre-fills fully via its intent.
+    let clipboardPayload: string | undefined
+    for (const p of platforms) {
+      const { copyPayload } = intentFor(p)
+      if (copyPayload) clipboardPayload = copyPayload
+    }
+    if (clipboardPayload) {
+      try {
+        await navigator.clipboard.writeText(clipboardPayload)
+        setCopyStatus('Post text copied — paste it into the composer')
+        setTimeout(() => setCopyStatus(''), 6000)
+      } catch { /* clipboard perm denied — user can still type */ }
+    }
+
     for (let i = 0; i < platforms.length; i++) {
-      const p = platforms[i]
-      const link = intentFor(p)
-      // Stagger by 250 ms so mobile WebViews queue them cleanly.
+      const { url: link } = intentFor(platforms[i])
       setTimeout(() => openOne(link), i * 250)
     }
     setXPostingStatus('idle')
