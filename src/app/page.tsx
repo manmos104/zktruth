@@ -4209,43 +4209,6 @@ export default function Home() {
     window.open(intent, '_blank', 'noopener,noreferrer')
   }, [buildProofUrl, proofData, gpsLocation, robustCopy]);
 
-  /**
-   * Standalone Truth Social share. Truth Social has no public share
-   * intent URL, so the entire flow is:
-   *   1. Copy the post body (with hashtags + /proof link) to the
-   *      clipboard using the fallback-chain writer.
-   *   2. Open truthsocial.com — the composer sits pinned at the top
-   *      of the home feed once the user is signed in, so paste +
-   *      submit finishes the post.
-   *   3. Show a persistent copy-status hint so the user knows the
-   *      clipboard has their message.
-   */
-  const openTruthShare = useCallback(async () => {
-    const url = buildProofUrl()
-    const parts: string[] = ['✅ Verified Proof of Capture on TON']
-    const ts = proofData?.timestamp
-      ? proofData.timestamp.replace('T', ' ').replace(/\.\d+/, '').replace('Z', ' UTC')
-      : ''
-    if (ts) parts.push(`⏱ ${ts}`)
-    if (gpsLocation) parts.push(`📍 ${gpsLocation}`)
-    parts.push('', 'via @zktruth_channel')
-    const baseText = parts.join('\n')
-    const textWithHashtags = `${baseText}\n\n#TON #TONblockchain #journalism`
-    const payload = `${textWithHashtags}\n\n${url}`
-    const ok = await robustCopy(payload)
-    setCopyStatus(ok
-      ? '✅ Post text copied — paste into Truth Social composer'
-      : 'Text: ' + payload.slice(0, 60) + '…')
-    setTimeout(() => setCopyStatus(''), 10000)
-    const tg = (window as unknown as {
-      Telegram?: { WebApp?: { openLink?: (u: string) => void } }
-    }).Telegram?.WebApp
-    const target = 'https://truthsocial.com/'
-    if (tg?.openLink) {
-      try { tg.openLink(target); return } catch { /* fall through */ }
-    }
-    window.open(target, '_blank', 'noopener,noreferrer')
-  }, [buildProofUrl, proofData, gpsLocation, robustCopy]);
 
   const handleShareWithImage = useCallback(async () => {
     // Post the capture to the public zkTruth Telegram channel.
@@ -5777,23 +5740,6 @@ export default function Home() {
                   }}
                 >
                   POST TO FARCASTER
-                </button>
-                {/* Standalone Truth Social broadcast. Same single-
-                    target rationale. Uses robust clipboard write +
-                    home-feed composer as the paste target because
-                    Truth Social has no public compose intent URL. */}
-                <button
-                  className="wid-verify-btn"
-                  onClick={openTruthShare}
-                  style={{
-                    background: '#B02F2F',
-                    backgroundImage: 'none',
-                    color: '#fff',
-                    boxShadow: '0 4px 18px rgba(176,47,47,0.4)',
-                    border: '1px solid rgba(255,255,255,0.18)',
-                  }}
-                >
-                  POST TO TRUTH SOCIAL
                 </button>
                 <button className="wid-gas-btn" onClick={handleCopyLink}>
                   <span>🔗</span> COPY LINK
