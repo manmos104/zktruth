@@ -2316,6 +2316,11 @@ export default function Home() {
   // done BEFORE we hand X the /proof URL or the tweet renders a
   // blank card.
   const [xPostingStatus, setXPostingStatus] = useState<'idle' | 'posting'>('idle');
+  // Post-tap queue for the "POST TO ALL" flow. Mobile WebViews only
+  // allow one window.open per user gesture, so we open the first
+  // platform inline and render a queue of follow-up buttons here;
+  // each button tap consumes the queue in its own gesture frame.
+  const [pendingShareQueue, setPendingShareQueue] = useState<Array<'x' | 'farcaster' | 'truth'>>([]);
   // Ephemeral toast for the SHARE flow. Renders as a floating message
   // over the wid-share screen so the user knows whether the image
   // attached to the share sheet, whether text landed on the clipboard,
@@ -4012,12 +4017,14 @@ export default function Home() {
     const textWithHashtags = `${baseText}\n\n#TON #TONblockchain #journalism`
 
     // 4) Intent URL builders per platform.
-    //    Farcaster and Truth Social don't reliably accept a
-    //    pre-filled compose intent the way X does — Warpcast's
-    //    compose URL works only inside an authenticated session,
-    //    and Truth Social has no public share endpoint at all.
-    //    Fallback: copy the full message to the clipboard AND open
-    //    the site's compose surface, so the user can just paste.
+    //    - X: intent URL fully pre-fills the composer, no clipboard
+    //      needed.
+    //    - Farcaster: Warpcast compose intent works when signed in,
+    //      clipboard as backup.
+    //    - Truth Social: NO public share endpoint. Best-effort deep
+    //      link into the native app (if installed) with clipboard
+    //      as the paste source; web fallback is truthsocial.com/home
+    //      which places the composer at the top of the feed.
     const intentFor = (p: 'x' | 'farcaster' | 'truth'): {
       url: string
       copyPayload?: string
@@ -4028,41 +4035,24 @@ export default function Home() {
         }
       }
       if (p === 'farcaster') {
-        // Warpcast compose intent (works if the user is signed in
-        // to warpcast.com in the browser that opens the link).
-        // Provide the same text on the clipboard so the paste
-        // path still works when the deep link goes to login.
         return {
           url: `https://warpcast.com/~/compose?text=${encodeURIComponent(textWithHashtags)}&embeds%5B%5D=${encodeURIComponent(url)}`,
           copyPayload: `${textWithHashtags}\n\n${url}`,
         }
       }
-      // Truth Social — no share intent, so we send the user to the
-      // home feed (which has the composer on top) and rely on
-      // clipboard paste for the message body.
+      // Truth Social. Drop straight into the home feed where the
+      // composer sits pinned at the top; the payload is on the
+      // clipboard, one paste finishes the post.
       return {
-        url: 'https://truthsocial.com/',
+        url: 'https://truthsocial.com/home',
         copyPayload: `${textWithHashtags}\n\n${url}`,
       }
     }
 
-    // 5) Open each composer. Small stagger avoids the WebView
-    //    coalescing them into one blocked popup.
-    const tg = (window as unknown as {
-      Telegram?: { WebApp?: { openLink?: (u: string) => void } }
-    }).Telegram?.WebApp
-    const openOne = (u: string) => {
-      if (tg?.openLink) {
-        try { tg.openLink(u); return } catch { /* fallthrough */ }
-      }
-      window.open(u, '_blank', 'noopener,noreferrer')
-    }
-
-    // Copy the clipboard payload for the LAST platform in the list —
-    // whichever composer opens on top is what the user will paste
-    // into. If multiple platforms need pasteable content, we prefer
-    // the "richer" one (Truth Social > Farcaster) since X already
-    // pre-fills fully via its intent.
+    // 5) Copy the paste-fallback payload BEFORE opening any windows.
+    //    Mobile browsers demote clipboard permission the moment the
+    //    tab loses focus (window.open steals focus), so this has to
+    //    happen while we're still in the direct user-gesture frame.
     let clipboardPayload: string | undefined
     for (const p of platforms) {
       const { copyPayload } = intentFor(p)
@@ -4072,15 +4062,83 @@ export default function Home() {
       try {
         await navigator.clipboard.writeText(clipboardPayload)
         setCopyStatus('Post text copied — paste it into the composer')
-        setTimeout(() => setCopyStatus(''), 6000)
-      } catch { /* clipboard perm denied — user can still type */ }
+        setTimeout(() => setCopyStatus(''), 8000)
+      } catch { /* perm denied — user can still type */ }
     }
 
-    for (let i = 0; i < platforms.length; i++) {
-      const { url: link } = intentFor(platforms[i])
-      setTimeout(() => openOne(link), i * 250)
+    // 6) Open each composer.
+    //    Reality check: mobile browsers enforce a strict "one
+    //    window.open per user gesture" rule. Every setTimeout call
+    //    detaches from the gesture, so subsequent opens after the
+    //    first get blocked as popups. Telegram's own openLink() has
+    //    the same limitation on iOS Telegram.
+    //
+    //    Workaround: open the FIRST platform inline (still in the
+    //    gesture frame), then queue the rest into `pendingShareQueue`
+    //    state. The UI renders a stack of "→ NEXT" buttons for the
+    //    remaining platforms; each tap opens that platform in its
+    //    own fresh gesture. Reliable across every mobile WebView.
+    const tg = (window as unknown as {
+      Telegram?: { WebApp?: { openLink?: (u: string) => void } }
+    }).Telegram?.WebApp
+    const openOne = (u: string) => {
+      if (tg?.openLink) {
+        try { tg.openLink(u); return } catch { /* fallthrough */ }
+      }
+      window.open(u, '_blank', 'noopener,noreferrer')
     }
+    if (platforms.length === 0) {
+      setXPostingStatus('idle')
+      return
+    }
+    // First platform: fire inline while we still have the gesture.
+    const first = platforms[0]
+    openOne(intentFor(first).url)
+    // Queue the rest for user-driven follow-up taps.
+    const rest = platforms.slice(1)
+    setPendingShareQueue(rest)
     setXPostingStatus('idle')
+  }, [buildProofUrl, proofData, gpsLocation]);
+
+  // Follow-up handler for the queued platforms. Each button in the
+  // "→ NEXT" strip calls this, giving each open its own user
+  // gesture so mobile popup blockers stay out of the way.
+  const openQueuedPlatform = useCallback((p: 'x' | 'farcaster' | 'truth') => {
+    const url = buildProofUrl()
+    const parts: string[] = ['✅ Verified Proof of Capture on TON']
+    const ts = proofData?.timestamp
+      ? proofData.timestamp.replace('T', ' ').replace(/\.\d+/, '').replace('Z', ' UTC')
+      : ''
+    if (ts) parts.push(`⏱ ${ts}`)
+    if (gpsLocation) parts.push(`📍 ${gpsLocation}`)
+    parts.push('', 'via @zktruth_channel')
+    const baseText = parts.join('\n')
+    const hashtagsCsv = 'TON,TONblockchain,journalism'
+    const textWithHashtags = `${baseText}\n\n#TON #TONblockchain #journalism`
+    let intent: string
+    let copyPayload: string | undefined
+    if (p === 'x') {
+      intent = `https://x.com/intent/tweet?text=${encodeURIComponent(baseText)}&url=${encodeURIComponent(url)}&hashtags=${encodeURIComponent(hashtagsCsv)}`
+    } else if (p === 'farcaster') {
+      intent = `https://warpcast.com/~/compose?text=${encodeURIComponent(textWithHashtags)}&embeds%5B%5D=${encodeURIComponent(url)}`
+      copyPayload = `${textWithHashtags}\n\n${url}`
+    } else {
+      intent = 'https://truthsocial.com/home'
+      copyPayload = `${textWithHashtags}\n\n${url}`
+    }
+    if (copyPayload) {
+      try { void navigator.clipboard.writeText(copyPayload) } catch {}
+    }
+    const tg = (window as unknown as {
+      Telegram?: { WebApp?: { openLink?: (u: string) => void } }
+    }).Telegram?.WebApp
+    if (tg?.openLink) {
+      try { tg.openLink(intent) } catch { window.open(intent, '_blank', 'noopener,noreferrer') }
+    } else {
+      window.open(intent, '_blank', 'noopener,noreferrer')
+    }
+    // Pop this platform off the queue.
+    setPendingShareQueue((q) => q.filter((x) => x !== p))
   }, [buildProofUrl, proofData, gpsLocation]);
 
   // Legacy single-target aliases so existing buttons keep working.
@@ -5664,6 +5722,66 @@ export default function Home() {
                 >
                   {xPostingStatus === 'posting' ? 'POSTING...' : '🚀 POST TO ALL (X + FARCASTER + TRUTH)'}
                 </button>
+                {/* Queue for the multi-platform fan-out. Whatever
+                    platforms didn't fit into the original gesture
+                    frame show up here as individual next-tap
+                    buttons. Each tap opens that composer in a
+                    fresh gesture — reliable across mobile WebViews
+                    where a single window.open followed by a
+                    setTimeout window.open gets popup-blocked. */}
+                {pendingShareQueue.length > 0 && (
+                  <div style={{
+                    marginTop: 4,
+                    padding: '10px 12px',
+                    border: '1px dashed rgba(255,255,255,0.28)',
+                    borderRadius: 12,
+                    background: 'rgba(255,255,255,0.04)',
+                  }}>
+                    <div style={{
+                      fontSize: 11,
+                      letterSpacing: 3,
+                      color: '#ffffff99',
+                      fontFamily: 'monospace',
+                      fontWeight: 700,
+                      textAlign: 'center',
+                      marginBottom: 8,
+                    }}>
+                      NEXT — TAP TO OPEN
+                    </div>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                      {pendingShareQueue.includes('farcaster') && (
+                        <button
+                          className="wid-verify-btn"
+                          onClick={() => openQueuedPlatform('farcaster')}
+                          style={{
+                            background: '#7C65C1',
+                            backgroundImage: 'none',
+                            color: '#fff',
+                            boxShadow: '0 4px 14px rgba(124,101,193,0.4)',
+                            border: '1px solid rgba(255,255,255,0.18)',
+                          }}
+                        >
+                          → OPEN FARCASTER
+                        </button>
+                      )}
+                      {pendingShareQueue.includes('truth') && (
+                        <button
+                          className="wid-verify-btn"
+                          onClick={() => openQueuedPlatform('truth')}
+                          style={{
+                            background: '#B02F2F',
+                            backgroundImage: 'none',
+                            color: '#fff',
+                            boxShadow: '0 4px 14px rgba(176,47,47,0.4)',
+                            border: '1px solid rgba(255,255,255,0.18)',
+                          }}
+                        >
+                          → OPEN TRUTH SOCIAL
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                )}
                 <button className="wid-gas-btn" onClick={handleCopyLink}>
                   <span>🔗</span> COPY LINK
                 </button>
