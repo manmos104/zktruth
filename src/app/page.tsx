@@ -5265,16 +5265,13 @@ export default function Home() {
                 <button
                   type="button"
                   className="wid-verify-btn"
-                  onClick={handleShareWithImage}
-                  disabled={sharing}
+                  onClick={() => openSnsShare("worldid")}
                   style={{
                     marginTop: 10,
                     background: '#0098ea',
                     backgroundImage: 'none',
                     color: '#fff',
                     boxShadow: '0 4px 18px rgba(0,152,234,0.32)',
-                    opacity: sharing ? 0.6 : 1,
-                    cursor: sharing ? 'wait' : 'pointer',
                     display: 'flex',
                     flexDirection: 'column',
                     alignItems: 'center',
@@ -5284,27 +5281,21 @@ export default function Home() {
                     padding: '12px 16px',
                   }}
                 >
-                  {sharing ? (
-                    <span style={{ fontWeight: 700 }}>POSTING...</span>
-                  ) : (
-                    <>
-                      <span style={{ fontWeight: 700, fontSize: 15, letterSpacing: 0.5 }}>
-                        📢 POST HASH TO CHANNEL · FREE
-                      </span>
-                      <span
-                        style={{
-                          fontSize: 10,
-                          opacity: 0.85,
-                          fontWeight: 500,
-                          letterSpacing: 0.3,
-                        }}
-                      >
-                        {shortTonAddr
-                          ? `no gas · signed as ${shortTonAddr}`
-                          : 'no gas · no wallet needed'}
-                      </span>
-                    </>
-                  )}
+                  <span style={{ fontWeight: 700, fontSize: 15, letterSpacing: 0.5 }}>
+                    📢 SHARE FREE · CHOOSE PLATFORM
+                  </span>
+                  <span
+                    style={{
+                      fontSize: 10,
+                      opacity: 0.85,
+                      fontWeight: 500,
+                      letterSpacing: 0.3,
+                    }}
+                  >
+                    {shortTonAddr
+                      ? `no gas · signed as ${shortTonAddr}`
+                      : 'no gas · no wallet needed'}
+                  </span>
                 </button>
 
                 {/* Placeholder mint button — routes into the existing
