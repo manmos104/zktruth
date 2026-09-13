@@ -119,9 +119,26 @@ export function PromotionOverlay({ fromTier, toTier, score, onDone }: Props): Re
     rot: (i / RAY_COUNT) * 360,
   }))
 
+  // Safety auto-dismiss. If for whatever reason the user's tap
+  // doesn't reach the overlay (iOS Safari sometimes drops click
+  // events on fixed-position elements after long CSS animations,
+  // or the user backgrounds the tab mid-idle-loop), we time the
+  // overlay out 12 seconds after entering phase 4 so the camera
+  // isn't held hostage behind a black screen forever.
+  useEffect(() => {
+    if (phase < 4) return
+    const t = setTimeout(() => onDone(), 12000)
+    return () => clearTimeout(t)
+  }, [phase, onDone])
+
   return (
     <div
       onClick={onDone}
+      // iOS Safari occasionally drops synthetic click events on
+      // fixed-position layers that have been through a long CSS
+      // animation. Adding a native touchend handler as a belt-and-
+      // braces backup guarantees the tap always dismisses.
+      onTouchEnd={(e) => { e.preventDefault(); onDone() }}
       style={{
         position: 'fixed',
         inset: 0,
@@ -138,6 +155,7 @@ export function PromotionOverlay({ fromTier, toTier, score, onDone }: Props): Re
         overflow: 'hidden',
         cursor: 'pointer',
         WebkitTapHighlightColor: 'transparent',
+        touchAction: 'manipulation',
       }}
     >
       <style>{`
@@ -411,6 +429,40 @@ export function PromotionOverlay({ fromTier, toTier, score, onDone }: Props): Re
         </div>
       )}
 
+      {/* Big, explicit close button. Belt-and-braces against the
+          rare-but-real iOS click-dropped case, and gives the user
+          a visible affordance to bail on their own terms without
+          hunting for the "tap anywhere" gesture. */}
+      {phase >= 4 && (
+        <button
+          onClick={(e) => { e.stopPropagation(); onDone() }}
+          onTouchEnd={(e) => { e.stopPropagation(); e.preventDefault(); onDone() }}
+          aria-label="Close celebration"
+          style={{
+            position: 'absolute',
+            top: 'calc(env(safe-area-inset-top, 0px) + 16px)',
+            right: 16,
+            width: 44,
+            height: 44,
+            borderRadius: '50%',
+            border: '1.5px solid rgba(255,255,255,0.4)',
+            background: 'rgba(0,0,0,0.5)',
+            color: '#ffffff',
+            fontSize: 22,
+            fontWeight: 700,
+            cursor: 'pointer',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: 0,
+            zIndex: 20001,
+            WebkitTapHighlightColor: 'transparent',
+            touchAction: 'manipulation',
+          }}
+        >
+          ✕
+        </button>
+      )}
       {/* Tap-to-dismiss hint */}
       {phase >= 4 && (
         <div style={{
