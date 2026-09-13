@@ -3143,65 +3143,22 @@ export default function Home() {
         timeStr: recStartTsStr,
       };
 
-      // Draw loop: video → canvas in cover mode against the PREVIEW
-      // aspect. Cover-cropping the source to the same aspect the
-      // preview element uses guarantees "what you see is what you
-      // save" — same FOV, same framing. After the frame is drawn we
-      // paint the proof-of-capture badges on top so the resulting
-      // MP4 (which is also what gets posted to the Telegram channel)
-      // carries the same overlays as photo captures.
-      // Snapshot the on-screen video element size ONCE at record
-      // start. We need it to back-project the on-screen 1:1 NFT guide
-      // to sensor coordinates so the recorded frame captures the
-      // same FOV the user was framing against. Recomputing per frame
-      // would be wasteful (rectV doesn't change during a recording)
-      // and could drift if a layout thrash mid-record briefly returned
-      // a stale rect.
-      const rectV = v.getBoundingClientRect();
-      const Vw = rectV.width || pw;
-      const Vh = rectV.height || ph;
-
-      const drawFrame = () => {
-        const vw = v.videoWidth || 1080;
-        const vh = v.videoHeight || 1920;
-        // Same viewport-aware sensor crop as the photo capture path
-        // (see handleCapture) — object-fit:cover baseScale times the
-        // CSS transform:scale(displayScale) gives the total mapping
-        // from sensor pixels to on-screen pixels. Back-project the
-        // Vw × Vw guide box through that to get the sensor square.
-        const baseScale = Math.max(Vw / vw, Vh / vh);
-        const totalScale = baseScale * displayScale;
-        const sideRaw = Vw / totalScale;
-        const side = Math.min(sideRaw, vw, vh);
-        const sx = (vw - side) / 2;
-        const sy = (vh - side) / 2;
-        const sw = side;
-        const sh = side;
-
-        ctx.save();
-        if (facingMode === 'user') {
-          ctx.translate(pw, 0);
-          ctx.scale(-1, 1);
-        }
-        ctx.drawImage(v, sx, sy, sw, sh, 0, 0, pw, ph);
-        ctx.restore();
-
-        // CRT texture animates every frame (fresh grain each tick) so
-        // the recorded video reads as live static rather than a still
-        // pattern. Only runs when the user has opted in.
-        if (crtMode) drawCrtOverlay(ctx, pw, ph);
-        // Keep the centered zkTruth wordmark on every recorded frame
-        // as a brand mark. The detailed proof overlays (timestamp /
-        // GPS / hash badges) were stripped 2026-09 to keep the video
-        // reading as a plain clip; those values still live in the
-        // NFT's attributes JSON and the video's poster JPEG.
-        drawZkTruthWatermark(ctx, pw, ph, wordmarkRef.current);
-
-        recAnimFrameRef.current = requestAnimationFrame(drawFrame);
-      };
-      drawFrame();
-
-      const canvasStream = rc.captureStream(30);
+      // Recording video source — use the raw getUserMedia video track
+      // directly instead of the older canvas.captureStream(30) draw
+      // loop. iOS Safari reliably throttles / suspends canvas capture
+      // streams after ~25-30 seconds of continuous rAF-driven
+      // drawImage, freezing the recorded video while audio keeps
+      // going. Feeding the encoder the sensor track straight from
+      // MediaStream keeps the pipeline entirely native and lets 3-
+      // minute clips finish without dropping frames.
+      //
+      // Trade-off: the on-clip zkTruth watermark and the CRT texture
+      // no longer bake into the recording. Photos still get them via
+      // the compositing path in handleCapture; a full-fidelity video
+      // watermark would need an off-thread encoder (WebCodecs) which
+      // isn't available on the iOS Safari builds we ship into.
+      void v; void ctx; void rc; void pw; void ph;
+      const canvasStream = new MediaStream(streamRef.current.getVideoTracks());
 
       // Route the mic through Web Audio API so the resulting audio track is
       // a freshly emitted track from a MediaStreamDestination — empirically
@@ -4900,16 +4857,17 @@ export default function Home() {
                 <div className="logo-text"><span className="logo-zk">zk</span><span className="logo-truth">Truth</span></div>
                 <div className="live-badge"><div className="live-dot" />{recording ? `REC ${formatTime(recordingTime)}` : 'LIVE'}</div>
               </div>
-              {/* Large recording-time HUD. Sits centred just under
-                  the top bar during recording so it reads as the
-                  primary status indicator, not a corner detail.
-                  Shows the elapsed clock and the remaining budget
-                  against the 3-minute cap so the user paces the
-                  shoot without guessing. */}
+              {/* Large recording-time HUD. Anchored at the lower
+                  third of the camera area so it sits directly above
+                  the shutter — the user's eyes are already there
+                  during the shot, and it clears the top bar for
+                  other status chips. Shows the elapsed clock and
+                  the remaining budget against the 3-minute cap so
+                  the user paces the shoot without guessing. */}
               {recording && (
                 <div style={{
                   position: 'absolute',
-                  top: 68,
+                  bottom: 'calc(env(safe-area-inset-bottom, 0px) + 190px)',
                   left: 0,
                   right: 0,
                   display: 'flex',
@@ -4918,23 +4876,23 @@ export default function Home() {
                   zIndex: 6,
                 }}>
                   <div style={{
-                    padding: '6px 16px',
-                    background: 'rgba(0,0,0,0.55)',
+                    padding: '8px 20px',
+                    background: 'rgba(0,0,0,0.6)',
                     border: '1px solid rgba(255,64,64,0.55)',
                     borderRadius: 999,
                     fontFamily: 'Space Mono, monospace',
-                    fontSize: 20,
+                    fontSize: 22,
                     fontWeight: 800,
                     letterSpacing: 3,
                     color: '#ff6b6b',
                     textShadow: '0 0 12px rgba(255,107,107,0.6)',
                     display: 'flex',
                     alignItems: 'center',
-                    gap: 10,
+                    gap: 12,
                   }}>
                     <span>●</span>
                     <span>{formatTime(recordingTime)}</span>
-                    <span style={{ color: 'rgba(255,255,255,0.5)', fontSize: 14 }}>
+                    <span style={{ color: 'rgba(255,255,255,0.5)', fontSize: 15 }}>
                       / {formatTime(MAX_REC)}
                     </span>
                   </div>
