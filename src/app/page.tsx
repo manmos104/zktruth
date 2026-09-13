@@ -6092,6 +6092,27 @@ export default function Home() {
                 }
               } catch { /* private browsing */ }
               setPromotion(null)
+              // Kick the camera stream back on. iOS Safari suspends
+              // getUserMedia video tracks while a fullscreen fixed
+              // overlay covers them, and the tracks don't
+              // spontaneously resume when the overlay unmounts —
+              // the video element just shows black. Nudging
+              // videoRef.play() is enough when the tracks are
+              // merely paused; if they were actually ended
+              // (long-form animations do sometimes trigger the
+              // camera-stopped policy) we fall back to a full
+              // startCamera restart with the current facing.
+              setTimeout(() => {
+                const v = videoRef.current
+                const s = streamRef.current
+                const live = s?.getVideoTracks().some((t) => t.readyState === 'live')
+                if (v && live) {
+                  try { v.srcObject = s } catch {}
+                  v.play().catch(() => { /* ignore autoplay policy */ })
+                } else {
+                  startCamera(facingMode).catch(() => {})
+                }
+              }, 60)
             }}
           />
         )}
