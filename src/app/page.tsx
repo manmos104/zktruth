@@ -4900,6 +4900,46 @@ export default function Home() {
                 <div className="logo-text"><span className="logo-zk">zk</span><span className="logo-truth">Truth</span></div>
                 <div className="live-badge"><div className="live-dot" />{recording ? `REC ${formatTime(recordingTime)}` : 'LIVE'}</div>
               </div>
+              {/* Large recording-time HUD. Sits centred just under
+                  the top bar during recording so it reads as the
+                  primary status indicator, not a corner detail.
+                  Shows the elapsed clock and the remaining budget
+                  against the 3-minute cap so the user paces the
+                  shoot without guessing. */}
+              {recording && (
+                <div style={{
+                  position: 'absolute',
+                  top: 68,
+                  left: 0,
+                  right: 0,
+                  display: 'flex',
+                  justifyContent: 'center',
+                  pointerEvents: 'none',
+                  zIndex: 6,
+                }}>
+                  <div style={{
+                    padding: '6px 16px',
+                    background: 'rgba(0,0,0,0.55)',
+                    border: '1px solid rgba(255,64,64,0.55)',
+                    borderRadius: 999,
+                    fontFamily: 'Space Mono, monospace',
+                    fontSize: 20,
+                    fontWeight: 800,
+                    letterSpacing: 3,
+                    color: '#ff6b6b',
+                    textShadow: '0 0 12px rgba(255,107,107,0.6)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 10,
+                  }}>
+                    <span>●</span>
+                    <span>{formatTime(recordingTime)}</span>
+                    <span style={{ color: 'rgba(255,255,255,0.5)', fontSize: 14 }}>
+                      / {formatTime(MAX_REC)}
+                    </span>
+                  </div>
+                </div>
+              )}
               {/* Top-right network status. Diamond glyph is TON's
                   brand cue, blue neon shadow gives it depth, monospace
                   + :: separator reads as a technical readout. No LIVE
@@ -5386,6 +5426,27 @@ export default function Home() {
                       background: '#000',
                     }}
                     onClick={(e) => e.stopPropagation()}
+                    // iOS Safari MediaRecorder duration fix. Clips
+                    // recorded via MediaRecorder frequently ship a
+                    // broken duration atom — the video plays for a
+                    // handful of seconds and then "freezes" because
+                    // the element thinks it has already reached
+                    // duration. Seeking to a very large timestamp
+                    // forces the browser to actually scan the blob
+                    // and recompute duration; on the resulting
+                    // `timeupdate` we snap back to 0. Applied only
+                    // once when duration comes back non-finite.
+                    onLoadedMetadata={(e) => {
+                      const el = e.currentTarget
+                      if (!Number.isFinite(el.duration) || el.duration === 0) {
+                        const onSeeked = () => {
+                          el.removeEventListener('timeupdate', onSeeked)
+                          el.currentTime = 0
+                        }
+                        el.addEventListener('timeupdate', onSeeked)
+                        try { el.currentTime = 1e101 } catch { /* iOS clamp */ }
+                      }
+                    }}
                   />
                 ) : (
                   capturedImage && (
