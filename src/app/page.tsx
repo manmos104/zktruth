@@ -3069,11 +3069,15 @@ export default function Home() {
   }, [capturing, cameraReady, gpsCoords, crtMode]);
 
   // Recording hard-stop. 60s × ~775 KB/s (6 Mbps video + 192 kbps
-  // audio) ≈ 46 MB — sits under Telegram Bot API's 50 MB upload
-  // ceiling with a few MB of head-room for bitrate spikes on
-  // motion-heavy scenes. Kept short so the user always gets the
-  // full high-bitrate quality without the upload getting rejected.
-  const MAX_REC = 60;
+  // audio) budget targets Telegram Bot API's 50 MB upload ceiling.
+  //
+  // 3-minute recordings at 2 Mbps video + 128 kbps audio come out
+  // around 48 MB — still under the 50 MB Telegram Bot API cap with a
+  // couple of MB of head-room for bitrate spikes on motion-heavy
+  // scenes. The bitrate drop from the previous 6 Mbps 1-minute setup
+  // is the trade: same on-chain hash guarantees, longer clip, lower
+  // per-frame fidelity. See videoBitsPerSecond further down.
+  const MAX_REC = 180;
 
   const handleVideoCapture = useCallback(() => {
     if (recording) {
@@ -3287,15 +3291,19 @@ export default function Home() {
         // the audio track silently when the encoder isn't told to budget
         // for it; setting `audioBitsPerSecond` forces the encoder to
         // allocate space for the mic stream.
-        // 6 Mbps video + 192 kbps audio ≈ 775 KB/s. At that rate a
-        // 60-second clip weighs ~46 MB — right under Telegram Bot
-        // API's 50 MB per-file limit with a small safety margin
-        // for bitrate spikes. Picked quality over length per the
-        // user's preference: reads as sharp 4K-ish 1080p rather
-        // than the muddier 3 Mbps we briefly tried.
+        //
+        // 2 Mbps video + 128 kbps audio ≈ 266 KB/s. At that rate a
+        // 180-second clip weighs ~48 MB — right under Telegram Bot
+        // API's 50 MB per-file limit with a small safety margin for
+        // bitrate spikes. This is the "3-minute preset" trade-off:
+        // shorter previous max (60s at 6 Mbps) gave near-broadcast
+        // sharpness, this one gives triple the length at roughly
+        // 720p-grade fidelity. Journalism value tends to come from
+        // duration + context, not per-frame sharpness, so the swap
+        // is worth it for the free-post use case.
         const recorderOpts: MediaRecorderOptions = selectedMime
-          ? { mimeType: selectedMime, audioBitsPerSecond: 192000, videoBitsPerSecond: 6_000_000 }
-          : { audioBitsPerSecond: 192000, videoBitsPerSecond: 6_000_000 }
+          ? { mimeType: selectedMime, audioBitsPerSecond: 128000, videoBitsPerSecond: 2_000_000 }
+          : { audioBitsPerSecond: 128000, videoBitsPerSecond: 2_000_000 }
         const recorder = new MediaRecorder(recordStream, recorderOpts);
         recorder.ondataavailable = (e) => {
           if (e.data.size > 0) recordedChunksRef.current.push(e.data);
