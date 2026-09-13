@@ -2524,6 +2524,12 @@ export default function Home() {
   const recordedChunksRef = useRef<Blob[]>([]);
   const recCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const recAnimFrameRef = useRef<number | null>(null);
+  // setInterval id for the canvas draw loop during recording.
+  // We swapped away from requestAnimationFrame because rAF gets
+  // aggressively throttled by iOS Safari after ~30 s of continuous
+  // activity, which was freezing the recorded video (audio kept
+  // going but the canvas capture stream stopped producing frames).
+  const recDrawIntervalRef = useRef<number | null>(null);
   // Overlay metadata snapshot taken at record-start. Used both by the
   // recording drawFrame loop (to paint the badges every tick) and by
   // recorder.onstop (to lock the SAME values into proofData so the
@@ -3085,6 +3091,8 @@ export default function Home() {
       if (recordingTimerRef.current) clearInterval(recordingTimerRef.current);
       if (recAnimFrameRef.current) cancelAnimationFrame(recAnimFrameRef.current);
       recAnimFrameRef.current = null;
+      if (recDrawIntervalRef.current) clearInterval(recDrawIntervalRef.current);
+      recDrawIntervalRef.current = null;
       if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
         mediaRecorderRef.current.stop();
       }
@@ -3143,22 +3151,59 @@ export default function Home() {
         timeStr: recStartTsStr,
       };
 
-      // Recording video source — use the raw getUserMedia video track
-      // directly instead of the older canvas.captureStream(30) draw
-      // loop. iOS Safari reliably throttles / suspends canvas capture
-      // streams after ~25-30 seconds of continuous rAF-driven
-      // drawImage, freezing the recorded video while audio keeps
-      // going. Feeding the encoder the sensor track straight from
-      // MediaStream keeps the pipeline entirely native and lets 3-
-      // minute clips finish without dropping frames.
+      // Draw loop restored — the raw-stream detour we briefly took
+      // recorded straight from the iPhone's landscape sensor, which
+      // came out sideways. Canvas gives us proper 1:1 portrait
+      // framing back, at the cost of dealing with iOS Safari's
+      // ~30 s canvas.captureStream throttle. Mitigations below:
       //
-      // Trade-off: the on-clip zkTruth watermark and the CRT texture
-      // no longer bake into the recording. Photos still get them via
-      // the compositing path in handleCapture; a full-fidelity video
-      // watermark would need an off-thread encoder (WebCodecs) which
-      // isn't available on the iOS Safari builds we ship into.
-      void v; void ctx; void rc; void pw; void ph;
-      const canvasStream = new MediaStream(streamRef.current.getVideoTracks());
+      //   * 15 fps capture instead of 30 — halves the rAF pressure
+      //     that trips iOS's power-management throttle.
+      //   * setInterval instead of requestAnimationFrame — rAF gets
+      //     throttled aggressively on iOS after ~30 s of continuous
+      //     activity; setInterval fires on its own timer regardless.
+      //   * `recorder.start(timeslice)` further down forces the
+      //     encoder to flush a chunk every 2 s so it stays awake
+      //     rather than buffering a single monolithic clip.
+      const rectV = v.getBoundingClientRect();
+      const Vw = rectV.width || pw;
+      const Vh = rectV.height || ph;
+
+      const drawFrame = () => {
+        const vw = v.videoWidth || 1080;
+        const vh = v.videoHeight || 1920;
+        const baseScale = Math.max(Vw / vw, Vh / vh);
+        const totalScale = baseScale * displayScale;
+        const sideRaw = Vw / totalScale;
+        const side = Math.min(sideRaw, vw, vh);
+        const sx = (vw - side) / 2;
+        const sy = (vh - side) / 2;
+        const sw = side;
+        const sh = side;
+
+        ctx.save();
+        if (facingMode === 'user') {
+          ctx.translate(pw, 0);
+          ctx.scale(-1, 1);
+        }
+        ctx.drawImage(v, sx, sy, sw, sh, 0, 0, pw, ph);
+        ctx.restore();
+
+        // Minimal per-frame extras — kept tiny so the interval tick
+        // stays under the 30 fps budget even on older iPhones.
+        if (crtMode) drawCrtOverlay(ctx, pw, ph);
+        drawZkTruthWatermark(ctx, pw, ph, wordmarkRef.current);
+      };
+      // Initial paint so the first captured frame isn't blank if the
+      // interval hasn't fired yet.
+      drawFrame();
+      // 66 ms ≈ 15 fps. Interval instead of rAF because iOS Safari's
+      // rAF is the thing that stalls the canvas capture stream after
+      // ~30 s; a plain timer fires regardless.
+      const drawIntervalId = window.setInterval(drawFrame, 66);
+      recDrawIntervalRef.current = drawIntervalId;
+
+      const canvasStream = rc.captureStream(15);
 
       // Route the mic through Web Audio API so the resulting audio track is
       // a freshly emitted track from a MediaStreamDestination — empirically
@@ -3320,11 +3365,19 @@ export default function Home() {
           }
         };
         mediaRecorderRef.current = recorder;
-        // Don't pass a timeslice — iOS Safari has been observed to emit
-        // chunks without the audio interleave when the encoder is asked
-        // to flush every N ms. Letting it produce one chunk at stop is
-        // the safest.
-        recorder.start();
+        // Timeslice 2 s. Passing a timeslice forces MediaRecorder to
+        // flush a chunk to `ondataavailable` on that interval instead
+        // of buffering a single monolithic clip until stop(). The
+        // regular flush is what keeps iOS Safari's encoder awake for
+        // 3-minute recordings — without it, the encoder tends to
+        // suspend after ~30 s and the resulting file only contains
+        // the first ~30 s of video (audio kept going because it
+        // routes through AudioContext). The dropped-audio bug that
+        // motivated the earlier timeslice-free setup was fixed by
+        // switching to webm+opus / mp4 with an explicit
+        // audioBitsPerSecond above; keeping the timeslice is safe
+        // now and unlocks the long-form recordings.
+        recorder.start(2000);
       } catch (e) {
         console.error('MediaRecorder error:', e);
         if (recAnimFrameRef.current) cancelAnimationFrame(recAnimFrameRef.current);
@@ -4857,47 +4910,6 @@ export default function Home() {
                 <div className="logo-text"><span className="logo-zk">zk</span><span className="logo-truth">Truth</span></div>
                 <div className="live-badge"><div className="live-dot" />{recording ? `REC ${formatTime(recordingTime)}` : 'LIVE'}</div>
               </div>
-              {/* Large recording-time HUD. Anchored at the lower
-                  third of the camera area so it sits directly above
-                  the shutter — the user's eyes are already there
-                  during the shot, and it clears the top bar for
-                  other status chips. Shows the elapsed clock and
-                  the remaining budget against the 3-minute cap so
-                  the user paces the shoot without guessing. */}
-              {recording && (
-                <div style={{
-                  position: 'absolute',
-                  bottom: 'calc(env(safe-area-inset-bottom, 0px) + 190px)',
-                  left: 0,
-                  right: 0,
-                  display: 'flex',
-                  justifyContent: 'center',
-                  pointerEvents: 'none',
-                  zIndex: 6,
-                }}>
-                  <div style={{
-                    padding: '8px 20px',
-                    background: 'rgba(0,0,0,0.6)',
-                    border: '1px solid rgba(255,64,64,0.55)',
-                    borderRadius: 999,
-                    fontFamily: 'Space Mono, monospace',
-                    fontSize: 22,
-                    fontWeight: 800,
-                    letterSpacing: 3,
-                    color: '#ff6b6b',
-                    textShadow: '0 0 12px rgba(255,107,107,0.6)',
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: 12,
-                  }}>
-                    <span>●</span>
-                    <span>{formatTime(recordingTime)}</span>
-                    <span style={{ color: 'rgba(255,255,255,0.5)', fontSize: 15 }}>
-                      / {formatTime(MAX_REC)}
-                    </span>
-                  </div>
-                </div>
-              )}
               {/* Top-right network status. Diamond glyph is TON's
                   brand cue, blue neon shadow gives it depth, monospace
                   + :: separator reads as a technical readout. No LIVE
@@ -5149,6 +5161,46 @@ export default function Home() {
 
             <div className={`flash-overlay ${flash ? 'active' : ''}`} />
             {recording && <div className="rec-progress"><div className="rec-progress-fill" style={{width: `${(recordingTime / MAX_REC) * 100}%`}} /></div>}
+            {/* Large recording HUD — sits directly above the shutter
+                so the user's eyes are already on it during the shot.
+                Positioned in the camera screen root (not inside the
+                top-bar, which absolute-positions its own children
+                and clipped this timer to a zero-height stripe). */}
+            {recording && (
+              <div style={{
+                position: 'absolute',
+                bottom: 'calc(env(safe-area-inset-bottom, 0px) + 200px)',
+                left: 0,
+                right: 0,
+                display: 'flex',
+                justifyContent: 'center',
+                pointerEvents: 'none',
+                zIndex: 10,
+              }}>
+                <div style={{
+                  padding: '10px 22px',
+                  background: 'rgba(0,0,0,0.7)',
+                  border: '1.5px solid rgba(255,64,64,0.7)',
+                  borderRadius: 999,
+                  fontFamily: 'Space Mono, monospace',
+                  fontSize: 24,
+                  fontWeight: 800,
+                  letterSpacing: 3,
+                  color: '#ff6b6b',
+                  textShadow: '0 0 14px rgba(255,107,107,0.6)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 12,
+                  boxShadow: '0 4px 20px rgba(255,64,64,0.35)',
+                }}>
+                  <span>●</span>
+                  <span>{formatTime(recordingTime)}</span>
+                  <span style={{ color: 'rgba(255,255,255,0.6)', fontSize: 16 }}>
+                    / {formatTime(MAX_REC)}
+                  </span>
+                </div>
+              </div>
+            )}
 
 
           </>
