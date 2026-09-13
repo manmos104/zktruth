@@ -45,6 +45,14 @@ export interface ProofRecord {
   chain: 'ton-mainnet'
   /** Collection contract address (user-friendly form). */
   collection: string
+  /**
+   * Whether this record originates from a paid NFT mint or a free
+   * channel-only post. Free posts still save a record so /proof/<hash>
+   * can render the capture media + timestamp + hash, but the on-chain
+   * rows on the verification page are suppressed since there is no
+   * TON NFT to anchor to.
+   */
+  kind?: 'mint' | 'free'
 }
 
 const K_PROOF = (hash: string) => `proof:${hash}`

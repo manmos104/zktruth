@@ -4528,6 +4528,15 @@ export default function Home() {
                 : rawContentHash
               ).toLowerCase()
             : undefined
+          // Populate the same capture-side fields we send on the mint
+          // path so /api/trust/mint can persist a full ProofRecord for
+          // the free post — /proof/<hash> needs captureTimestamp,
+          // GPS hash, and (via Blob resolution) the media URL to
+          // render properly. Without these the verification page
+          // renders as "Proof Not Found".
+          const freeCaptureTsSec = proofData?.timestamp
+            ? Math.floor(new Date(proofData.timestamp).getTime() / 1000)
+            : Math.floor(Date.now() / 1000)
           fetch('/api/trust/mint', {
             method: 'POST',
             headers: { 'content-type': 'application/json' },
@@ -4539,6 +4548,7 @@ export default function Home() {
               // Does NOT lift the score-gate; wallet still needs a paid
               // mint before this credit becomes visible.
               kind: 'free',
+              captureTimestampSec: freeCaptureTsSec,
             }),
           })
             .then(() => setTrustRefreshCount((n) => n + 1))

@@ -109,39 +109,38 @@ export async function POST(request: Request) {
     // is 100% funded by mint fees, so a free post must not increment it.
     if (kind === 'mint') {
       try { await creditMintToPool(messageId) } catch { /* ignore */ }
+    }
 
-      // Phase 5 — persist the proof record so /proof/<hash> can look
-      // it up server-side and cross-check against the on-chain Item.
-      // Free posts skip this on purpose: they don't create an NFT,
-      // so there's nothing to anchor for verification.
-      if (/^[0-9a-f]{64}$/.test(contentHashHex)) {
-        const captureTs =
-          typeof body?.captureTimestampSec === 'number'
-          && Number.isFinite(body.captureTimestampSec)
-          && body.captureTimestampSec > 0
-            ? Math.floor(body.captureTimestampSec)
-            : Math.floor(now / 1000)
-        const rec: ProofRecord = {
-          contentHashHex,
-          wallet,
-          captureTimestampSec: captureTs,
-          telegramMessageId: messageId,
-          telegramPostUrl: messageId > 0
-            ? `${TELEGRAM_CHANNEL_URL_BASE.replace(/\/$/, '')}/${messageId}`
-            : undefined,
-          mediaUrl: typeof body?.mediaUrl === 'string' ? body.mediaUrl : undefined,
-          posterUrl: typeof body?.posterUrl === 'string' ? body.posterUrl : undefined,
-          gpsHashDec: typeof body?.gpsHashDec === 'string' ? body.gpsHashDec : undefined,
-          mintedAt: now,
-          chain: 'ton-mainnet',
-          collection: ZKTRUTH_COLLECTION,
-        }
-        try { await saveProof(rec) } catch (err) {
-          // proofStore failure is non-fatal — the mint still counts
-          // toward Trust Score; /proof/<hash> will just fall back to
-          // the on-chain-only path (item address discovery via tonapi).
-          console.warn('[mint] saveProof failed', err)
-        }
+    // Persist a proof record for BOTH mint and free posts so
+    // /proof/<hash> can render the capture media + basic metadata.
+    // The `kind` field lets the verification page distinguish an
+    // on-chain-anchored mint from an off-chain free post and switch
+    // its status text / on-chain rows accordingly.
+    if (/^[0-9a-f]{64}$/.test(contentHashHex)) {
+      const captureTs =
+        typeof body?.captureTimestampSec === 'number'
+        && Number.isFinite(body.captureTimestampSec)
+        && body.captureTimestampSec > 0
+          ? Math.floor(body.captureTimestampSec)
+          : Math.floor(now / 1000)
+      const rec: ProofRecord = {
+        contentHashHex,
+        wallet,
+        captureTimestampSec: captureTs,
+        telegramMessageId: messageId,
+        telegramPostUrl: messageId > 0
+          ? `${TELEGRAM_CHANNEL_URL_BASE.replace(/\/$/, '')}/${messageId}`
+          : undefined,
+        mediaUrl: typeof body?.mediaUrl === 'string' ? body.mediaUrl : undefined,
+        posterUrl: typeof body?.posterUrl === 'string' ? body.posterUrl : undefined,
+        gpsHashDec: typeof body?.gpsHashDec === 'string' ? body.gpsHashDec : undefined,
+        mintedAt: kind === 'mint' ? now : 0,
+        chain: 'ton-mainnet',
+        collection: ZKTRUTH_COLLECTION,
+        kind,
+      }
+      try { await saveProof(rec) } catch (err) {
+        console.warn(`[${kind}] saveProof failed`, err)
       }
     }
 

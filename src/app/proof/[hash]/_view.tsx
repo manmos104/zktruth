@@ -99,18 +99,29 @@ export async function ProofView({ hash: rawHash }: { hash: string }) {
   const data = await loadProof(hash)
   const { proof, onchain, media, verified } = data
 
-  const state: 'verified' | 'pending' | 'notFound' =
+  // State machine:
+  //   verified → on-chain TON NFT verified via tonapi lookup
+  //   pending  → mint record exists but the indexer hasn't caught up
+  //   free     → hash + capture posted for free (no mint), but a
+  //              full ProofRecord + Blob media exist — show media +
+  //              basic metadata, skip the on-chain rows
+  //   notFound → nothing known about this hash
+  const state: 'verified' | 'pending' | 'free' | 'notFound' =
     verified ? 'verified'
-    : proof ? 'pending'
+    : proof && proof.kind === 'mint' ? 'pending'
+    : proof && proof.kind === 'free' ? 'free'
+    : proof ? 'pending' // legacy records with no kind field default to mint
     : 'notFound'
 
   const statusTitle =
     state === 'verified' ? 'On-Chain Proof Confirmed'
     : state === 'pending' ? 'Pending Chain Confirmation'
+    : state === 'free' ? 'Captured on zkTruth'
     : 'Proof Not Found'
   const statusSub =
     state === 'verified' ? 'Anchored on TON mainnet · TEP-62 NFT'
     : state === 'pending' ? 'Mint recorded — indexer is catching up'
+    : state === 'free' ? 'Off-chain record · Free channel post'
     : 'No mint record and no on-chain item for this hash'
 
   const posterUrl = media.posterUrl ?? media.imageUrl
@@ -161,6 +172,12 @@ export async function ProofView({ hash: rawHash }: { hash: string }) {
               <path d="M8 8l8 8M16 8l-8 8"/>
             </svg>
           )}
+          {state === 'free' && (
+            <svg viewBox="0 0 24 24" fill="none" stroke="#4dd4ff" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/>
+              <circle cx="12" cy="13" r="4"/>
+            </svg>
+          )}
         </div>
         <h1 className="proof-status-title">{statusTitle}</h1>
         <div className="proof-status-sub">{statusSub}</div>
@@ -192,22 +209,38 @@ export async function ProofView({ hash: rawHash }: { hash: string }) {
                 <span className="mono">TEP-62 NFT</span>
               </Row>
 
-              <div className="proof-section">Anchor</div>
+              <div className="proof-section">
+                {state === 'free' ? 'Attribution' : 'Anchor'}
+              </div>
               <Row label="Wallet">
                 {walletAddr
                   ? <a className="mono link" href={`https://tonviewer.com/${walletAddr}`} target="_blank" rel="noopener noreferrer">{shortAddr(walletAddr)}</a>
                   : '—'}
               </Row>
-              <Row label="NFT Item">
-                {onchain?.itemAddress
-                  ? <a className="mono link" href={onchain.tonviewerUrl} target="_blank" rel="noopener noreferrer">{shortAddr(onchain.itemAddress)}</a>
-                  : <span className="dim">pending</span>}
-              </Row>
-              <Row label="Item #">
-                {typeof onchain?.itemIndex === 'number'
-                  ? <span className="mono">{onchain.itemIndex}</span>
-                  : <span className="dim">—</span>}
-              </Row>
+              {/* On-chain rows only make sense for records that have
+                  (or expect) an NFT. Free posts explicitly opt out
+                  of the mint, so we hide these rather than confusing
+                  the viewer with "pending" states that will never
+                  resolve. */}
+              {state !== 'free' && (
+                <>
+                  <Row label="NFT Item">
+                    {onchain?.itemAddress
+                      ? <a className="mono link" href={onchain.tonviewerUrl} target="_blank" rel="noopener noreferrer">{shortAddr(onchain.itemAddress)}</a>
+                      : <span className="dim">pending</span>}
+                  </Row>
+                  <Row label="Item #">
+                    {typeof onchain?.itemIndex === 'number'
+                      ? <span className="mono">{onchain.itemIndex}</span>
+                      : <span className="dim">—</span>}
+                  </Row>
+                </>
+              )}
+              {state === 'free' && (
+                <Row label="Anchor">
+                  <span className="dim">Off-chain · Not minted</span>
+                </Row>
+              )}
               {tgLink && (
                 <Row label="Channel">
                   <a className="link" href={tgLink} target="_blank" rel="noopener noreferrer">
