@@ -3985,26 +3985,16 @@ export default function Home() {
     platforms: Array<'x' | 'farcaster' | 'truth'>,
   ) => {
     setXPostingStatus('posting')
-    // 1) Channel post.
-    const post = shareToChannelRef.current
-    if (post) {
-      try { await post() } catch { /* keep going */ }
-    }
-    // 2) Wait for Blob upload — required for og:image.
-    try {
-      const pre = preheatUploadRef.current
-      if (pre) {
-        await pre.mediaPromise
-        if (pre.posterPromise) { try { await pre.posterPromise } catch {} }
-      }
-    } catch { /* fallthrough */ }
 
-    // 3) Build the shared text body once — same message across
-    //    every platform so screenshots read identically. The
-    //    opening headline switches based on whether the capture
-    //    has been minted so we don't falsely claim "Verified Proof
-    //    of Capture on TON" for a free (unminted) post — that
-    //    claim requires an actual NFT on-chain.
+    // Build the intent URLs BEFORE any await so the composer opens
+    // are still inside the direct user-gesture frame — this is what
+    // gets mobile WebViews to bypass the popup blocker. Historically
+    // we awaited the channel post + Blob upload first "for the OG
+    // card", but that broke the gesture and free (unminted) posts
+    // stopped opening the composer at all. Now the composer fires
+    // instantly on tap and the channel post / Blob upload run in
+    // the background; the OG card will hydrate on the second scrape
+    // if the first one raced the upload.
     const url = buildProofUrl()
     const headline = mintComplete
       ? '✅ Verified Proof of Capture on TON'
@@ -4056,35 +4046,11 @@ export default function Home() {
       }
     }
 
-    // 5) Copy the paste-fallback payload BEFORE opening any windows.
-    //    Mobile browsers demote clipboard permission the moment the
-    //    tab loses focus (window.open steals focus), so this has to
-    //    happen while we're still in the direct user-gesture frame.
-    let clipboardPayload: string | undefined
-    for (const p of platforms) {
-      const { copyPayload } = intentFor(p)
-      if (copyPayload) clipboardPayload = copyPayload
-    }
-    if (clipboardPayload) {
-      try {
-        await navigator.clipboard.writeText(clipboardPayload)
-        setCopyStatus('Post text copied — paste it into the composer')
-        setTimeout(() => setCopyStatus(''), 8000)
-      } catch { /* perm denied — user can still type */ }
-    }
-
-    // 6) Open each composer.
-    //    Reality check: mobile browsers enforce a strict "one
-    //    window.open per user gesture" rule. Every setTimeout call
-    //    detaches from the gesture, so subsequent opens after the
-    //    first get blocked as popups. Telegram's own openLink() has
-    //    the same limitation on iOS Telegram.
-    //
-    //    Workaround: open the FIRST platform inline (still in the
-    //    gesture frame), then queue the rest into `pendingShareQueue`
-    //    state. The UI renders a stack of "→ NEXT" buttons for the
-    //    remaining platforms; each tap opens that platform in its
-    //    own fresh gesture. Reliable across every mobile WebView.
+    // 5) Fire the composer OPEN first, still inside the gesture.
+    //    Any await between the tap and this call — clipboard write,
+    //    network fetches, blob uploads — will get the window.open
+    //    popup-blocked on mobile WebViews. Everything else runs
+    //    fire-and-forget after this point.
     const tg = (window as unknown as {
       Telegram?: { WebApp?: { openLink?: (u: string) => void } }
     }).Telegram?.WebApp
@@ -4098,10 +4064,46 @@ export default function Home() {
       setXPostingStatus('idle')
       return
     }
-    // First platform: fire inline while we still have the gesture.
     const first = platforms[0]
     openOne(intentFor(first).url)
-    // Queue the rest for user-driven follow-up taps.
+
+    // 6) Copy the paste-fallback payload. Clipboard writeText is
+    //    synchronous-ish on modern browsers; even if the user
+    //    switched tabs it usually still lands because the promise
+    //    was created inside the gesture.
+    let clipboardPayload: string | undefined
+    for (const p of platforms) {
+      const { copyPayload } = intentFor(p)
+      if (copyPayload) clipboardPayload = copyPayload
+    }
+    if (clipboardPayload) {
+      try {
+        void navigator.clipboard.writeText(clipboardPayload)
+        setCopyStatus('Post text copied — paste it into the composer')
+        setTimeout(() => setCopyStatus(''), 8000)
+      } catch { /* perm denied — user can still type */ }
+    }
+
+    // 7) Kick the channel post + Blob upload wait in the background.
+    //    These are for the OG-card scrape only; if they miss, the
+    //    social composer still opens with the correct text and URL,
+    //    and the OG card will hydrate on X's / Farcaster's next
+    //    scrape once the Blob upload completes.
+    ;(async () => {
+      const post = shareToChannelRef.current
+      if (post) {
+        try { await post() } catch { /* fallthrough */ }
+      }
+      try {
+        const pre = preheatUploadRef.current
+        if (pre) {
+          await pre.mediaPromise
+          if (pre.posterPromise) { try { await pre.posterPromise } catch {} }
+        }
+      } catch { /* fallthrough */ }
+    })()
+
+    // 8) Queue the rest of the platforms for follow-up taps.
     const rest = platforms.slice(1)
     setPendingShareQueue(rest)
     setXPostingStatus('idle')
