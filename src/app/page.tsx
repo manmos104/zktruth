@@ -3405,7 +3405,7 @@ export default function Home() {
   const formatTime = (s: number) => `${String(Math.floor(s/60)).padStart(2,'0')}:${String(s%60).padStart(2,'0')}`;
 
   const handleReset = useCallback(() => {
-    setScreen("camera"); setMintComplete(false); setCapturedImage(null); setCapturedVideo(null); setProofData(null); rawImageForNftRef.current = null; preheatUploadRef.current = null;
+    setScreen("camera"); setMintComplete(false); setCapturedImage(null); setCapturedVideo(null); setProofData(null); rawImageForNftRef.current = null; preheatUploadRef.current = null; lastChannelPostedHashRef.current = null;
     setTxHash(null); setRecording(false); setWorldIdVerified(false); setWorldIdVerifying(false);
     setWorldIdNullifier(null); setMintMode("verified");
     // Reset → drop both persisted entries (flow snapshot + signed
@@ -3982,6 +3982,10 @@ export default function Home() {
    * self-contained.
    */
   const shareToChannelRef = useRef<(() => Promise<void>) | null>(null);
+  // Dedup guard for handleShareWithImage. Holds the hash of the
+  // capture we most recently posted to the channel; a repeat call
+  // for the same hash is a no-op. See handleShareWithImage for why.
+  const lastChannelPostedHashRef = useRef<string | null>(null);
 
   /**
    * Multi-platform channel + external social broadcast.
@@ -4244,6 +4248,18 @@ export default function Home() {
 
 
   const handleShareWithImage = useCallback(async () => {
+    // Guard against duplicate posts for the SAME capture. Users
+    // occasionally double-tap POST TO CHANNEL + X, or tap POST TO
+    // CHANNEL followed by POST TO CHANNEL + X, which used to fire
+    // the Telegram send twice and leave the channel with two
+    // identical entries. We stash the last hash we successfully
+    // posted for in a ref and short-circuit any subsequent call
+    // for that same hash. Cleared on reset (new capture → new
+    // proofData.hash), so a fresh shoot posts fine.
+    const currentHash = proofData?.hash ?? null
+    if (currentHash && lastChannelPostedHashRef.current === currentHash) {
+      return
+    }
     // Post the capture to the public zkTruth Telegram channel.
     //
     // We POST **directly** to `api.telegram.org/bot<TOKEN>/...` from
@@ -4530,6 +4546,13 @@ export default function Home() {
       // Remember the post URL so a subsequent MINT ON TON call can
       // stamp its Telegram message id into the on-chain NFT record.
       setLastTelegramPostUrl(postUrl)
+      // Mark this capture as already posted so any follow-up tap of
+      // POST TO CHANNEL / POST TO CHANNEL + X for the same shoot
+      // short-circuits at the top of handleShareWithImage and
+      // doesn't leave the channel with duplicates.
+      if (proofData?.hash) {
+        lastChannelPostedHashRef.current = proofData.hash
+      }
 
       // Trust Score bookkeeping for the FREE hash-post path — mirror
       // the paid-mint route so reactions and views collected on this
