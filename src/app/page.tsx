@@ -3016,7 +3016,13 @@ export default function Home() {
             // reading as a plain photo — the on-screen viewfinder DOM
             // still shows those values as a shooting aid, and the
             // NFT's attributes JSON continues to carry them off-image.
-            drawZkTruthWatermark(nftCtx, NFT_EDGE, NFT_EDGE, wordmarkRef.current);
+            // Centre wordmark watermark removed at user request —
+            // the on-screen brand chrome + Telegram channel post
+            // already carry the attribution; a mid-frame overlay on
+            // the actual capture obscures the subject and reads as
+            // watermarked stock imagery. Attribution still lives in
+            // the /proof/<hash> page and the NFT metadata JSON.
+            void wordmarkRef;
             rawImage = nftC.toDataURL('image/jpeg', 0.9);
             // Unify: capturedImage (used by preview + Telegram post)
             // becomes the SAME square. This drops the old branded
@@ -3192,7 +3198,9 @@ export default function Home() {
         // Minimal per-frame extras — kept tiny so the interval tick
         // stays under the 30 fps budget even on older iPhones.
         if (crtMode) drawCrtOverlay(ctx, pw, ph);
-        drawZkTruthWatermark(ctx, pw, ph, wordmarkRef.current);
+        // Wordmark watermark stripped from the recording path too —
+        // matches the still-photo capture path so shared media
+        // reads as a clean shot, not a stamped promo asset.
       };
       // Initial paint so the first captured frame isn't blank if the
       // interval hasn't fired yet.
