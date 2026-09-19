@@ -1,40 +1,33 @@
 import { NextResponse } from 'next/server'
-import { head, put } from '@vercel/blob'
+import { PutObjectCommand } from '@aws-sdk/client-s3'
+import { getR2Client, r2HeadPublicUrl, r2PublicUrl, R2_BUCKET } from '@/lib/r2'
 
 /**
- * Upload a captured photo to Vercel Blob under a deterministic key
- * (`captures/<sha256-hex>.jpg`) so the NFT metadata endpoint can
- * construct the public URL from the same hash without a KV lookup.
+ * Server-side capture upload — writes the file to Cloudflare R2 at
+ * `captures/<sha256-hex>.<ext>` and returns the deterministic public
+ * URL. Used as a fallback when the client-side presigned-PUT path
+ * fails (rare); most uploads go straight to R2 from the browser via
+ * `/api/upload/token`.
  *
- * Called by the frontend right before it fires the TON mint tx. If this
- * fails the frontend aborts the mint — a Proof NFT with no image is
- * worse than no NFT at all.
+ * Migrated off Vercel Blob after the free-tier caps blew out — see
+ * `/api/upload/token/route.ts` for the client-side path.
  *
  * Request body: multipart/form-data with fields
  *   file  — the image blob (jpg/png; ~2-5 MB expected)
  *   hash  — lowercase 64-char hex SHA-256 of the file (used as key)
  *
- * Response: { url: string, hash: string }
- *
- * Auth: none. Deterministic key + allowOverwrite means a malicious
- * caller could replace someone else's NFT image by knowing the hash.
- * SHA-256 preimage resistance makes this hard in practice (you'd need
- * to know the original photo), and the NFT itself lives on-chain — so
- * worst case is cosmetic. We can layer TON Connect signature check in
- * later if this becomes an issue.
+ * Response: { url: string, hash: string, cached?: true }
  */
 export const runtime = 'nodejs'
-// The Blob SDK does its own body handling; disable Next's default
-// bodyParser cap so 5 MB captures don't get rejected.
 export const maxDuration = 30
 
 const HASH_RE = /^[0-9a-f]{64}$/
 
 export async function POST(request: Request) {
-  const token = process.env.BLOB_READ_WRITE_TOKEN
-  if (!token) {
+  const client = getR2Client()
+  if (!client) {
     return NextResponse.json(
-      { error: 'BLOB_READ_WRITE_TOKEN not configured' },
+      { error: 'R2 not configured (missing R2_ACCOUNT_ID / KEY / BUCKET envs)' },
       { status: 500 },
     )
   }
@@ -60,8 +53,6 @@ export async function POST(request: Request) {
   const hash = hashRaw.toLowerCase()
 
   // Pick an extension the wallets / marketplaces will sniff correctly.
-  // Order matters: check the most-specific mime types first (video vs
-  // image), then fall back to jpg for the common photo path.
   const mime = (file.type || '').toLowerCase()
   const ext =
     mime === 'image/png'
@@ -75,28 +66,22 @@ export async function POST(request: Request) {
             : 'jpg'
   const key = `captures/${hash}.${ext}`
 
-  // Content-addressed storage: the same hash always maps to the same
-  // bytes, so if the key already exists we're done — no re-upload
-  // needed. This also sidesteps the fact that older @vercel/blob
-  // versions don't accept `allowOverwrite: true`, which would otherwise
-  // make put() throw on a duplicate key.
-  try {
-    const existing = await head(key, { token })
-    if (existing?.url) {
-      return NextResponse.json({ url: existing.url, hash, cached: true })
-    }
-  } catch {
-    // head() throws on 404; that just means we haven't uploaded yet.
+  // Content-addressed storage: same hash → same bytes, so if the key
+  // already exists we're done.
+  const existing = await r2HeadPublicUrl(key)
+  if (existing) {
+    return NextResponse.json({ url: existing, hash, cached: true })
   }
 
   try {
-    const { url } = await put(key, file, {
-      access: 'public',
-      addRandomSuffix: false,
-      contentType: file.type || 'image/jpeg',
-      token,
-    })
-    return NextResponse.json({ url, hash })
+    const buf = Buffer.from(await file.arrayBuffer())
+    await client.send(new PutObjectCommand({
+      Bucket: R2_BUCKET,
+      Key: key,
+      Body: buf,
+      ContentType: file.type || 'image/jpeg',
+    }))
+    return NextResponse.json({ url: r2PublicUrl(key), hash })
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err)
     return NextResponse.json({ error: msg }, { status: 500 })

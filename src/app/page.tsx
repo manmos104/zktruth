@@ -8,7 +8,10 @@ import { WorldIdVerifyButton } from '@/lib/worldid';
 import { useTelegramBackButton } from './hooks/useTelegramBackButton';
 import { useTelegramExpand } from './hooks/useTelegramExpand';
 import { useTonConnectUI, useTonWallet } from '@tonconnect/ui-react';
-import { upload } from '@vercel/blob/client';
+// Blob upload path migrated from Vercel Blob to Cloudflare R2 after
+// the free-tier caps got blown out. Uploads now go via a short-lived
+// presigned PUT URL that our `/api/upload/token` endpoint hands back.
+// See `uploadCaptureToR2` below.
 import { Address } from '@ton/core';
 import { TrustBadge, type TrustTier as TrustTierType } from './TrustBadge';
 import { PromotionOverlay, TIER_ORDER } from './PromotionOverlay';
@@ -2105,17 +2108,60 @@ async function probeVideoMeta(video: Blob): Promise<{ width: number; height: num
  * logged and re-thrown so the mint handler can fall back to a fresh
  * sync upload (which surfaces UX errors properly).
  */
+/**
+ * Uploads a capture blob directly to Cloudflare R2 using a presigned
+ * PUT URL. Two-hop flow:
+ *
+ *   1. POST /api/upload/token with { pathname, contentType }
+ *      → server validates the shape and returns { uploadUrl, publicUrl }
+ *   2. fetch(uploadUrl, { method: 'PUT', body: blob })
+ *      → browser streams directly to R2 (no Vercel Function in the
+ *        middle, so no 4.5 MB body cap)
+ *
+ * Rejects on any non-2xx from either step so the mint handler can
+ * fall back to a sync upload path that surfaces UX errors properly.
+ */
+async function uploadCaptureToR2(
+  pathname: string,
+  blob: Blob,
+  contentType: string,
+): Promise<void> {
+  const tokenRes = await fetch('/api/upload/token', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ pathname, contentType }),
+  })
+  if (!tokenRes.ok) {
+    const t = await tokenRes.text().catch(() => '')
+    throw new Error(`presign failed (${tokenRes.status}): ${t.slice(0, 160)}`)
+  }
+  const { uploadUrl } = (await tokenRes.json()) as { uploadUrl: string }
+  if (!uploadUrl) throw new Error('presign returned no uploadUrl')
+  const putRes = await fetch(uploadUrl, {
+    method: 'PUT',
+    body: blob,
+    headers: { 'content-type': contentType },
+  })
+  if (!putRes.ok) {
+    const t = await putRes.text().catch(() => '')
+    throw new Error(`R2 PUT failed (${putRes.status}): ${t.slice(0, 160)}`)
+  }
+}
+
 async function preheatUploadMedia(
   hash: string,
   mediaBlob: Blob,
   ext: string,
 ): Promise<void> {
   const pathname = `captures/${hash}.${ext}`
-  await upload(pathname, mediaBlob, {
-    access: 'public',
-    handleUploadUrl: '/api/upload/token',
-    contentType: mediaBlob.type || undefined,
-  })
+  const contentType = mediaBlob.type || (
+    ext === 'jpg' ? 'image/jpeg'
+    : ext === 'png' ? 'image/png'
+    : ext === 'mp4' ? 'video/mp4'
+    : ext === 'webm' ? 'video/webm'
+    : 'application/octet-stream'
+  )
+  await uploadCaptureToR2(pathname, mediaBlob, contentType)
 }
 
 async function preheatUploadPoster(
@@ -2128,11 +2174,7 @@ async function preheatUploadPoster(
     hash,
   })
   if (!posterBlob) return
-  await upload(`captures/${hash}.jpg`, posterBlob, {
-    access: 'public',
-    handleUploadUrl: '/api/upload/token',
-    contentType: 'image/jpeg',
-  })
+  await uploadCaptureToR2(`captures/${hash}.jpg`, posterBlob, 'image/jpeg')
 }
 
 async function extractFirstFrameJpeg(
@@ -3769,12 +3811,15 @@ export default function Home() {
         // cap — the browser PUTs straight to Blob storage using a
         // token that /api/upload/token signs for this exact pathname.
         // This is what makes 50 MB video mints work.
-        const blob = await upload(pathname, uploadBlob, {
-          access: 'public',
-          handleUploadUrl: '/api/upload/token',
-          contentType: uploadBlob.type || undefined,
-        })
-        setShareStatus(`UPLOADED: ${blob.url.slice(-60)}`)
+        const uploadContentType = uploadBlob.type || (
+          ext === 'jpg' ? 'image/jpeg'
+          : ext === 'png' ? 'image/png'
+          : ext === 'mp4' ? 'video/mp4'
+          : ext === 'webm' ? 'video/webm'
+          : 'application/octet-stream'
+        )
+        await uploadCaptureToR2(pathname, uploadBlob, uploadContentType)
+        setShareStatus(`UPLOADED: ${pathname.slice(-60)}`)
 
         // For videos, ALSO upload a first-frame JPEG poster under the
         // same hash. Wallets like Tonkeeper only render `image`, not
@@ -3800,11 +3845,7 @@ export default function Home() {
             })
             if (posterBlob) {
               const posterPath = `captures/${contentHashHex}.jpg`
-              await upload(posterPath, posterBlob, {
-                access: 'public',
-                handleUploadUrl: '/api/upload/token',
-                contentType: 'image/jpeg',
-              })
+              await uploadCaptureToR2(posterPath, posterBlob, 'image/jpeg')
               setShareStatus('POSTER UPLOADED')
             }
           } catch (posterErr) {

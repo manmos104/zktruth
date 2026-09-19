@@ -1,26 +1,23 @@
 import { NextResponse } from 'next/server'
-import { handleUpload, type HandleUploadBody } from '@vercel/blob/client'
+import { presignPutUrl, r2PublicUrl } from '@/lib/r2'
 
 /**
- * Signs client-side upload tokens for `@vercel/blob/client`.
+ * Presigns a PUT URL against Cloudflare R2 so the browser can
+ * upload capture media directly, bypassing Vercel Function body
+ * limits (4.5 MB on Hobby) and, more importantly, Vercel Blob's
+ * 10 000-Simple / 2 000-Advanced monthly caps that we blew past
+ * when the app hit real traffic.
  *
- * Why bypass our own upload proxy? Vercel Functions on the Hobby plan
- * cap request bodies at 4.5 MB, which is fine for JPEG captures but
- * blows up on 20–50 MB video files. The client-uploads flow uploads
- * straight from the browser to the Blob store using a short-lived
- * signed token this endpoint issues — no bytes ever cross a Vercel
- * Function.
- *
- * The flow is:
- *   1. client calls upload(...) from '@vercel/blob/client'
- *   2. SDK POSTs a `blob.generate-client-token` body to this route
- *   3. we call handleUpload() which validates + signs a token
- *   4. SDK PUTs the blob directly to
- *      `<store>.public.blob.vercel-storage.com/...`
- *
- * We keep the same deterministic keying as the server-upload endpoint:
- * `captures/<sha256-hex>.<ext>`. The Blob store is public so the
- * resolved URL is fetchable by any wallet or marketplace without auth.
+ * Flow:
+ *   1. Client POSTs `{ pathname, contentType }` (with pathname of
+ *      shape `captures/<sha256-hex>.<ext>`).
+ *   2. We validate the shape and the MIME, then presign a short-
+ *      lived PUT URL.
+ *   3. Client fetches (PUT) directly to the presigned URL with the
+ *      blob body.
+ *   4. Public URL of the finished object comes back in the same
+ *      response so the client / server can persist it in the proof
+ *      record.
  */
 
 export const runtime = 'nodejs'
@@ -35,40 +32,47 @@ const ALLOWED_MIMES = new Set<string>([
 ])
 
 export async function POST(request: Request): Promise<NextResponse> {
-  const body = (await request.json()) as HandleUploadBody
+  let body: { pathname?: string; contentType?: string }
+  try {
+    body = (await request.json()) as { pathname?: string; contentType?: string }
+  } catch {
+    return NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 })
+  }
+  const pathname = String(body?.pathname ?? '')
+  const contentType = String(body?.contentType ?? '').toLowerCase()
+
+  const m = /^captures\/([0-9a-f]{64})\.(jpg|png|mp4|webm)$/.exec(pathname)
+  if (!m) {
+    return NextResponse.json(
+      { error: `pathname must be captures/<hash>.(jpg|png|mp4|webm) — got ${pathname}` },
+      { status: 400 },
+    )
+  }
+  const hash = m[1]
+  if (!HASH_RE.test(hash)) {
+    return NextResponse.json({ error: 'hash segment must be 64-char lowercase hex' }, { status: 400 })
+  }
+  if (!ALLOWED_MIMES.has(contentType)) {
+    return NextResponse.json(
+      { error: `contentType must be one of ${Array.from(ALLOWED_MIMES).join(', ')}` },
+      { status: 400 },
+    )
+  }
 
   try {
-    const json = await handleUpload({
-      body,
-      request,
-      onBeforeGenerateToken: async (pathname /* clientPayload */) => {
-        // Enforce our deterministic key shape so a malicious client
-        // can't scatter arbitrary blobs across the store.
-        const m = /^captures\/([0-9a-f]{64})\.(jpg|png|mp4|webm)$/.exec(pathname)
-        if (!m) {
-          throw new Error(`pathname must be captures/<hash>.(jpg|png|mp4|webm) — got ${pathname}`)
-        }
-        const hash = m[1]
-        if (!HASH_RE.test(hash)) {
-          throw new Error('hash segment must be 64-char lowercase hex')
-        }
-        return {
-          allowedContentTypes: Array.from(ALLOWED_MIMES),
-          // Cap uploads at 60 MB — plenty of headroom for a 60s
-          // 6 Mbps video (~45 MB) while still stopping abuse.
-          maximumSizeInBytes: 60 * 1024 * 1024,
-          addRandomSuffix: false,
-          allowOverwrite: true,
-        }
-      },
-      onUploadCompleted: async () => {
-        // No-op: the metadata endpoint pulls the URL fresh via head()
-        // on every request, so we don't need to persist anything here.
-      },
+    const uploadUrl = await presignPutUrl(pathname, contentType, 300)
+    const publicUrl = r2PublicUrl(pathname)
+    return NextResponse.json({
+      uploadUrl,
+      publicUrl,
+      pathname,
+      contentType,
+      // Kept for older clients — the SDK-side `upload()` used to
+      // return a similar shape. Doesn't hurt to include.
+      url: publicUrl,
     })
-    return NextResponse.json(json)
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err)
-    return NextResponse.json({ error: msg }, { status: 400 })
+    return NextResponse.json({ error: msg }, { status: 500 })
   }
 }
