@@ -77,7 +77,25 @@ export async function presignPutUrl(
     Key: key,
     ContentType: contentType,
   })
-  return getSignedUrl(client, cmd, { expiresIn: expiresInSeconds })
+  // Aggressively strip the AWS SDK's flexible-checksum middleware.
+  // The middleware injects `x-amz-checksum-crc32` (or similar)
+  // headers into the presigned signature; R2 doesn't support those
+  // headers, and even if it silently accepted them, the browser's
+  // subsequent PUT wouldn't include the checksum bytes, so R2 would
+  // return `SignatureDoesNotMatch`. Removing the middleware here
+  // guarantees the signature only covers headers the browser will
+  // actually send.
+  try {
+    cmd.middlewareStack.remove('flexibleChecksumsMiddleware')
+  } catch { /* older SDKs don't have this middleware — fine */ }
+  return getSignedUrl(client, cmd, {
+    expiresIn: expiresInSeconds,
+    // Belt-and-braces: whitelist the only headers we know the browser
+    // will send. `host` is required, `content-type` matches what our
+    // client-side fetch() sets. Any other header sneaking into the
+    // signature would trigger a signature-mismatch failure.
+    signableHeaders: new Set(['host', 'content-type']),
+  })
 }
 
 /**
