@@ -42,6 +42,14 @@ export function getR2Client(): S3Client | null {
       accessKeyId: R2_ACCESS_KEY_ID,
       secretAccessKey: R2_SECRET_ACCESS_KEY,
     },
+    // Path-style URLs (`<account>.r2.cloudflarestorage.com/<bucket>/...`)
+    // instead of virtual-hosted (`<bucket>.<account>...`). The virtual-
+    // hosted subdomain frequently fails on iOS Safari inside the
+    // Telegram Mini App WebView with a bare "Load failed" fetch error —
+    // Cloudflare's wildcard cert or DNS handling on the sub-subdomain
+    // isn't reliable there. Path-style hits a single well-known host
+    // that always resolves cleanly.
+    forcePathStyle: true,
     // R2 rejects the `x-amz-checksum-crc32` header that the AWS SDK
     // now sends by default (since v3.729). Without this the presigned
     // PUT URL bakes the checksum header into the signature and the
