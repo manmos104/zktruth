@@ -4374,28 +4374,17 @@ export default function Home() {
     await robustCopy(`${textWithHashtags}\n\n${url}`)
     setCopyStatus('Post text copied — paste into Warpcast if needed')
     setTimeout(() => setCopyStatus(''), 8000)
-    // Open the Warpcast composer inline (still inside the user gesture,
-    // so mobile WebViews don't popup-block it).
+    // Farcaster stays a standalone broadcast — no Telegram channel
+    // post here. Users who want the channel mirror tap POST TO
+    // CHANNEL + X instead. Reintroduced this restriction after the
+    // team asked to keep Warpcast as a pure single-target share.
     const tg = (window as unknown as {
       Telegram?: { WebApp?: { openLink?: (u: string) => void } }
     }).Telegram?.WebApp
     if (tg?.openLink) {
-      try { tg.openLink(intent) } catch { window.open(intent, '_blank', 'noopener,noreferrer') }
-    } else {
-      window.open(intent, '_blank', 'noopener,noreferrer')
+      try { tg.openLink(intent); return } catch { /* fall through */ }
     }
-    // Fire the Telegram channel post in the background — mirrors what
-    // openMultiShare(['x']) does for X. Dedup guard inside
-    // handleShareWithImage prevents a duplicate post if the same
-    // capture was already channel-posted (e.g. via POST TO CHANNEL + X
-    // earlier). Fire-and-forget so a channel-post failure doesn't
-    // block the Farcaster composer from opening.
-    ;(async () => {
-      const post = shareToChannelRef.current
-      if (post) {
-        try { await post() } catch { /* fallthrough */ }
-      }
-    })()
+    window.open(intent, '_blank', 'noopener,noreferrer')
   }, [buildProofUrl, proofData, gpsLocation, robustCopy, mintComplete]);
 
 
