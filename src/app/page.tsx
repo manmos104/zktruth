@@ -2745,13 +2745,57 @@ export default function Home() {
       if (streamRef.current) {
         streamRef.current.getTracks().forEach(t => t.stop());
       }
+      // Chase Telegram-level fidelity: request the full sensor
+      // resolution (4K on modern iPhones), 30 fps, and continuous
+      // auto-focus / exposure / white balance so the preview and
+      // captured frame look identical to the OS camera app. iOS
+      // Safari happily downgrades to whatever the device supports
+      // when the ideal isn't reachable, so a big `ideal` value is
+      // safe — no need to gate by device.
+      //
+      // `advanced` constraints for focus / exposure / whiteBalance
+      // are wrapped in a try/catch by the SDK — unsupported entries
+      // are silently ignored rather than failing the whole
+      // getUserMedia call.
+      const advanced: MediaTrackConstraintSet[] = [
+        { focusMode: 'continuous' } as MediaTrackConstraintSet,
+        { exposureMode: 'continuous' } as MediaTrackConstraintSet,
+        { whiteBalanceMode: 'continuous' } as MediaTrackConstraintSet,
+      ];
       let video: MediaTrackConstraints;
       if (opts?.deviceId) {
-        video = { deviceId: { exact: opts.deviceId }, width: { ideal: 1920 }, height: { ideal: 1440 } };
+        // Ultra-wide / tele lens explicitly requested — same 4K
+        // ideal, sensor picks its native aspect.
+        video = {
+          deviceId: { exact: opts.deviceId },
+          width: { ideal: 3840, min: 1920 },
+          height: { ideal: 2160, min: 1080 },
+          frameRate: { ideal: 30, max: 60 },
+          advanced,
+        };
       } else if ((facing || facingMode) === "user" && opts?.frontWide) {
-        video = { facingMode: "user", width: { ideal: 1920 }, height: { ideal: 1440 }, aspectRatio: { ideal: 4 / 3 } };
+        // Front camera "wide" mode — pull the wider 4:3 sensor crop
+        // rather than the default 16:9 crop, so selfies match what
+        // the native camera renders.
+        video = {
+          facingMode: "user",
+          width: { ideal: 1920 },
+          height: { ideal: 1440 },
+          aspectRatio: { ideal: 4 / 3 },
+          frameRate: { ideal: 30, max: 60 },
+          advanced,
+        };
       } else {
-        video = { facingMode: facing || facingMode, width: { ideal: 1080 }, height: { ideal: 1920 } };
+        // Default back camera. Request 4K portrait with generous
+        // downgrade room. Older iPhones will land on ~1920×1080,
+        // newer ones on true 3840×2160.
+        video = {
+          facingMode: facing || facingMode,
+          width: { ideal: 2160, min: 1080 },
+          height: { ideal: 3840, min: 1920 },
+          frameRate: { ideal: 30, max: 60 },
+          advanced,
+        };
       }
       // Request the microphone alongside the camera ONLY when the
       // user is in video mode. Photo mode never needs audio, so
@@ -3020,7 +3064,14 @@ export default function Home() {
         // NFT upload AND the preview / Telegram share, so everything
         // downstream stays visually consistent with a wallet gallery.
         try {
-          const NFT_EDGE = 1080;
+          // NFT/share resolution — bumped from 1080 to 2160 (4K
+          // square) so the tile stays sharp when someone opens the
+          // image full-screen or scrolls it into a large wallet
+          // gallery. Original 1080 was fine at native wallet-tile
+          // size but pixelated the moment anyone zoomed in. 2160
+          // stays under most marketplace upload caps while giving
+          // ~4× the pixel density.
+          const NFT_EDGE = 2160;
           const nftC = document.createElement('canvas');
           nftC.width = NFT_EDGE;
           nftC.height = NFT_EDGE;
@@ -3065,7 +3116,7 @@ export default function Home() {
             // watermarked stock imagery. Attribution still lives in
             // the /proof/<hash> page and the NFT metadata JSON.
             void wordmarkRef;
-            rawImage = nftC.toDataURL('image/jpeg', 0.9);
+            rawImage = nftC.toDataURL('image/jpeg', 0.95);
             // Unify: capturedImage (used by preview + Telegram post)
             // becomes the SAME square. This drops the old branded
             // 9:16 share card in favour of one square that reads
@@ -5172,9 +5223,60 @@ export default function Home() {
             </div>
 
             <div className="bottom-controls">
-              {/* Zoom controls removed — app always opens to the widest FOV
-                  (back ultra-wide / front 4:3) and lets the user flip cameras
-                  with the FLIP button. */}
+              {/* Zoom pill — shows 0.5x / 1x / 2x buttons, styled
+                  after the native iOS camera UI. The 0.5x is only
+                  meaningful on the back camera (front camera doesn't
+                  have an ultrawide sensor); we hide it on the front
+                  to avoid rendering a dead button. 2x is a digital
+                  crop achieved via CSS transform when the sensor
+                  doesn't have a native telephoto lens — most iPhones
+                  do, so the AWS SDK's applyConstraints({zoom})
+                  handles it natively where available. */}
+              {!recording && (
+                <div style={{
+                  display: 'flex',
+                  gap: 8,
+                  marginBottom: 12,
+                  padding: '6px 8px',
+                  background: 'rgba(0,0,0,0.55)',
+                  borderRadius: 999,
+                  backdropFilter: 'blur(10px)',
+                  WebkitBackdropFilter: 'blur(10px)',
+                }}>
+                  {(facingMode === 'environment'
+                    ? [0.5, 1, 2, 3]
+                    : [1, 2]
+                  ).map((level) => {
+                    const active = Math.abs(zoomLevel - level) < 0.05
+                    return (
+                      <button
+                        key={level}
+                        onClick={() => handleZoom(level)}
+                        style={{
+                          minWidth: 40,
+                          height: 40,
+                          borderRadius: 999,
+                          border: 'none',
+                          padding: '0 12px',
+                          background: active ? 'rgba(255,214,10,0.95)' : 'transparent',
+                          color: active ? '#000' : '#fff',
+                          fontFamily: 'Space Mono, monospace',
+                          fontSize: active ? 12 : 11,
+                          fontWeight: 800,
+                          letterSpacing: 0.5,
+                          cursor: 'pointer',
+                          transition: 'background 120ms ease, color 120ms ease, font-size 120ms ease',
+                          WebkitTapHighlightColor: 'transparent',
+                        }}
+                        aria-label={`Zoom ${level}x`}
+                        aria-pressed={active}
+                      >
+                        {level}×
+                      </button>
+                    )
+                  })}
+                </div>
+              )}
               <div className="mode-tabs">
                 <button className={`mode-tab ${captureMode === 'photo' ? 'active' : ''}`} onClick={() => !recording && setCaptureMode('photo')}>PHOTO</button>
                 <button
