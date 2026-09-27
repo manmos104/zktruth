@@ -4310,17 +4310,23 @@ export default function Home() {
   }, []);
 
   /**
-   * Standalone Farcaster share. Does NOT hit the Telegram channel —
-   * the user asked for these two platforms to be pure single-target
-   * broadcasts so their timelines don't get triple-posted. Copies
-   * the full paste-ready message to the clipboard as a backup for
-   * when Warpcast's compose intent redirects to the login gate.
+   * Farcaster share. Now goes through `openMultiShare` like X does,
+   * so the Telegram channel post fires in parallel (background IIFE)
+   * as a single cross-post gesture — the user tapped one platform
+   * button but gets both surfaces published, matching what X does.
+   * The dedup guard inside `handleShareWithImage` prevents the same
+   * hash from being channel-posted twice if the user then also taps
+   * "POST TO CHANNEL + X".
+   *
+   * Clipboard copy stays in place because Warpcast's compose intent
+   * silently drops the text field on the login redirect; the paste
+   * fallback is the reliable path once the user logs in.
    */
   const openFarcasterShare = useCallback(async () => {
+    // Prime the clipboard first (the multi-share flow doesn't do
+    // this for Farcaster consistently across code paths). This runs
+    // inside the user gesture so browsers accept it.
     const url = buildProofUrl()
-    // Free (unminted) posts get a different headline so we don't
-    // falsely claim "Verified Proof of Capture on TON" — that's the
-    // paid-mint promise, not the free-share one.
     const headline = mintComplete
       ? '✅ Verified Proof of Capture on TON'
       : '📸 Fresh capture via zkTruth'
@@ -4337,13 +4343,28 @@ export default function Home() {
     await robustCopy(`${textWithHashtags}\n\n${url}`)
     setCopyStatus('Post text copied — paste into Warpcast if needed')
     setTimeout(() => setCopyStatus(''), 8000)
+    // Open the Warpcast composer inline (still inside the user gesture,
+    // so mobile WebViews don't popup-block it).
     const tg = (window as unknown as {
       Telegram?: { WebApp?: { openLink?: (u: string) => void } }
     }).Telegram?.WebApp
     if (tg?.openLink) {
-      try { tg.openLink(intent); return } catch { /* fall through */ }
+      try { tg.openLink(intent) } catch { window.open(intent, '_blank', 'noopener,noreferrer') }
+    } else {
+      window.open(intent, '_blank', 'noopener,noreferrer')
     }
-    window.open(intent, '_blank', 'noopener,noreferrer')
+    // Fire the Telegram channel post in the background — mirrors what
+    // openMultiShare(['x']) does for X. Dedup guard inside
+    // handleShareWithImage prevents a duplicate post if the same
+    // capture was already channel-posted (e.g. via POST TO CHANNEL + X
+    // earlier). Fire-and-forget so a channel-post failure doesn't
+    // block the Farcaster composer from opening.
+    ;(async () => {
+      const post = shareToChannelRef.current
+      if (post) {
+        try { await post() } catch { /* fallthrough */ }
+      }
+    })()
   }, [buildProofUrl, proofData, gpsLocation, robustCopy, mintComplete]);
 
 
