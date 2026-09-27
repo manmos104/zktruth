@@ -2616,9 +2616,17 @@ export default function Home() {
     if (preheatUploadRef.current?.hash === hash) return
     const isVideo = /^video\//i.test(mediaBlob.type)
     const mediaPromise = preheatUploadMedia(hash, mediaBlob, ext)
-    // Silence unhandled-rejection console noise; the mint handler
-    // catches errors when it awaits the promise.
-    mediaPromise.catch((err) => console.warn('[preheat] media', err))
+    // Surface upload failures to the user via shareStatus so the
+    // "why is /proof empty?" and "why is my X card blank?" cases
+    // stop being invisible. Previously we swallowed the error with
+    // console.warn and the user had no way to tell R2 upload had
+    // failed until they visited the tweet.
+    mediaPromise.catch((err) => {
+      const msg = err instanceof Error ? err.message : String(err)
+      console.warn('[preheat] media', err)
+      setShareStatus(`Media upload failed — /proof + X card will be blank: ${msg.slice(0, 140)}`)
+      setTimeout(() => setShareStatus(''), 12000)
+    })
     const posterPromise = isVideo
       ? preheatUploadPoster(hash, mediaBlob).catch((err) => {
           console.warn('[preheat] poster', err)
@@ -4206,11 +4214,21 @@ export default function Home() {
       } catch { /* perm denied — user can still type */ }
     }
 
-    // 7) Kick the channel post + Blob upload wait in the background.
-    //    These are for the OG-card scrape only; if they miss, the
-    //    social composer still opens with the correct text and URL,
-    //    and the OG card will hydrate on X's / Farcaster's next
-    //    scrape once the Blob upload completes.
+    // 7) Channel post + Blob upload wait.
+    //    CRITICAL for OG card correctness: X's scraper hits our
+    //    /proof URL the instant the tweet URL is submitted. If R2
+    //    doesn't have the capture at that moment, X caches an
+    //    empty card forever — even after R2 catches up later, the
+    //    tweet stays imageless. We therefore AWAIT the preheat
+    //    (bounded to 10 s so the UX doesn't stall on network
+    //    failures) before firing the second composer via
+    //    openQueuedPlatform.
+    //
+    //    The first composer was already opened above (inside the
+    //    gesture) so mobile popup blockers don't get in the way.
+    //    For minted / OG-heavy shares the composer opens instantly
+    //    on tap but the tweet composition itself gives R2 plenty
+    //    of time to finish — that's the window we're using.
     ;(async () => {
       const post = shareToChannelRef.current
       if (post) {
@@ -4219,10 +4237,23 @@ export default function Home() {
       try {
         const pre = preheatUploadRef.current
         if (pre) {
-          await pre.mediaPromise
-          if (pre.posterPromise) { try { await pre.posterPromise } catch {} }
+          const timeout = new Promise<void>((_, reject) =>
+            setTimeout(() => reject(new Error('preheat-timeout')), 10_000),
+          )
+          await Promise.race([pre.mediaPromise, timeout])
+          if (pre.posterPromise) {
+            try { await Promise.race([pre.posterPromise, timeout]) } catch {}
+          }
         }
-      } catch { /* fallthrough */ }
+      } catch (err) {
+        // Surface the media upload failure so the user knows why
+        // their card is blank instead of silently posting to X.
+        const msg = err instanceof Error ? err.message : String(err)
+        if (msg !== 'preheat-timeout') {
+          setShareStatus(`Media upload failed — X card may be blank: ${msg.slice(0, 140)}`)
+          setTimeout(() => setShareStatus(''), 12000)
+        }
+      }
     })()
 
     // 8) Queue the rest of the platforms for follow-up taps.
