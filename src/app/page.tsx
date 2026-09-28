@@ -2433,6 +2433,18 @@ export default function Home() {
   // Free-form user comment attached to the capture (displayed on the
   // verify screen as the dominant input above the action buttons).
   const [captureComment, setCaptureComment] = useState("");
+  // Platform-specific captions. Each social has its own textarea
+  // because the character limits diverge:
+  //   * X caps posts at 280 characters (URL counts as 23 via t.co)
+  //   * Farcaster caps casts at 320 characters (URLs count as 1
+  //     embed, not against the char budget)
+  // Users want to be able to write a longer, more journalistic
+  // Farcaster cast while keeping the tweet punchy — so we keep the
+  // two fields independent and let them switch between via a
+  // top-of-textarea tab.
+  const [xComment, setXComment] = useState("");
+  const [farcasterComment, setFarcasterComment] = useState("");
+  const [captionTab, setCaptionTab] = useState<'x' | 'farcaster' | 'channel'>('x');
 
   // Snapshot key for localStorage. World App's auto-redirect after
   // verification re-loads the page in a fresh tab, dropping React state.
@@ -4143,6 +4155,12 @@ export default function Home() {
     // platforms.
     const textWithHashtags = `${baseText}\n\n#TON #TONblockchain #journalism`
 
+    // Per-platform user text — set on the worldid capture screen
+    // via the X / Farcaster tabs. Trimmed on read so a whitespace-
+    // only draft doesn't inject a blank line.
+    const xUser = xComment.trim()
+    const fcUser = farcasterComment.trim()
+
     // 4) Intent URL builders per platform.
     //    - X: intent URL fully pre-fills the composer, no clipboard
     //      needed.
@@ -4157,14 +4175,19 @@ export default function Home() {
       copyPayload?: string
     } => {
       if (p === 'x') {
+        // Prepend the user's caption BEFORE the auto-generated
+        // metadata so their voice reads first. Two newlines separate
+        // it from the boilerplate.
+        const xText = xUser ? `${xUser}\n\n${baseText}` : baseText
         return {
-          url: `https://x.com/intent/tweet?text=${encodeURIComponent(baseText)}&url=${encodeURIComponent(url)}&hashtags=${encodeURIComponent(hashtagsCsv)}`,
+          url: `https://x.com/intent/tweet?text=${encodeURIComponent(xText)}&url=${encodeURIComponent(url)}&hashtags=${encodeURIComponent(hashtagsCsv)}`,
         }
       }
       if (p === 'farcaster') {
+        const fcText = fcUser ? `${fcUser}\n\n${textWithHashtags}` : textWithHashtags
         return {
-          url: `https://warpcast.com/~/compose?text=${encodeURIComponent(textWithHashtags)}&embeds%5B%5D=${encodeURIComponent(url)}`,
-          copyPayload: `${textWithHashtags}\n\n${url}`,
+          url: `https://warpcast.com/~/compose?text=${encodeURIComponent(fcText)}&embeds%5B%5D=${encodeURIComponent(url)}`,
+          copyPayload: `${fcText}\n\n${url}`,
         }
       }
       // Truth Social. Drop straight into the home feed where the
@@ -4260,7 +4283,7 @@ export default function Home() {
     const rest = platforms.slice(1)
     setPendingShareQueue(rest)
     setXPostingStatus('idle')
-  }, [buildProofUrl, proofData, gpsLocation, mintComplete]);
+  }, [buildProofUrl, proofData, gpsLocation, mintComplete, xComment, farcasterComment]);
 
   // Follow-up handler for the queued platforms. Each button in the
   // "→ NEXT" strip calls this, giving each open its own user
@@ -4279,11 +4302,18 @@ export default function Home() {
     const textWithHashtags = `${baseText}\n\n#TON #TONblockchain #journalism`
     let intent: string
     let copyPayload: string | undefined
+    // Same per-platform user captions the primary path uses — the
+    // queue is just a delayed second gesture, so the text has to
+    // stay consistent.
+    const xUser = xComment.trim()
+    const fcUser = farcasterComment.trim()
     if (p === 'x') {
-      intent = `https://x.com/intent/tweet?text=${encodeURIComponent(baseText)}&url=${encodeURIComponent(url)}&hashtags=${encodeURIComponent(hashtagsCsv)}`
+      const xText = xUser ? `${xUser}\n\n${baseText}` : baseText
+      intent = `https://x.com/intent/tweet?text=${encodeURIComponent(xText)}&url=${encodeURIComponent(url)}&hashtags=${encodeURIComponent(hashtagsCsv)}`
     } else if (p === 'farcaster') {
-      intent = `https://warpcast.com/~/compose?text=${encodeURIComponent(textWithHashtags)}&embeds%5B%5D=${encodeURIComponent(url)}`
-      copyPayload = `${textWithHashtags}\n\n${url}`
+      const fcText = fcUser ? `${fcUser}\n\n${textWithHashtags}` : textWithHashtags
+      intent = `https://warpcast.com/~/compose?text=${encodeURIComponent(fcText)}&embeds%5B%5D=${encodeURIComponent(url)}`
+      copyPayload = `${fcText}\n\n${url}`
     } else {
       intent = 'https://truthsocial.com/home'
       copyPayload = `${textWithHashtags}\n\n${url}`
@@ -4301,7 +4331,7 @@ export default function Home() {
     }
     // Pop this platform off the queue.
     setPendingShareQueue((q) => q.filter((x) => x !== p))
-  }, [buildProofUrl, proofData, gpsLocation]);
+  }, [buildProofUrl, proofData, gpsLocation, xComment, farcasterComment]);
 
   // Legacy alias: X share is still coupled with the Telegram
   // channel post (the whole point of the X leg is to force our own
@@ -4370,8 +4400,12 @@ export default function Home() {
     parts.push('', 'via @zktruth_channel')
     const baseText = parts.join('\n')
     const textWithHashtags = `${baseText}\n\n#TON #TONblockchain #journalism`
-    const intent = `https://warpcast.com/~/compose?text=${encodeURIComponent(textWithHashtags)}&embeds%5B%5D=${encodeURIComponent(url)}`
-    await robustCopy(`${textWithHashtags}\n\n${url}`)
+    // Prepend the Farcaster-tab draft (up to 320 chars) so the user's
+    // voice reads first in the cast.
+    const fcUser = farcasterComment.trim()
+    const fcText = fcUser ? `${fcUser}\n\n${textWithHashtags}` : textWithHashtags
+    const intent = `https://warpcast.com/~/compose?text=${encodeURIComponent(fcText)}&embeds%5B%5D=${encodeURIComponent(url)}`
+    await robustCopy(`${fcText}\n\n${url}`)
     setCopyStatus('Post text copied — paste into Warpcast if needed')
     setTimeout(() => setCopyStatus(''), 8000)
     // Farcaster stays a standalone broadcast — no Telegram channel
@@ -4385,7 +4419,7 @@ export default function Home() {
       try { tg.openLink(intent); return } catch { /* fall through */ }
     }
     window.open(intent, '_blank', 'noopener,noreferrer')
-  }, [buildProofUrl, proofData, gpsLocation, robustCopy, mintComplete]);
+  }, [buildProofUrl, proofData, gpsLocation, robustCopy, mintComplete, farcasterComment]);
 
 
   const handleShareWithImage = useCallback(async () => {
@@ -5462,38 +5496,130 @@ export default function Home() {
                   </>
                 )}
               </div>
-              {(capturedImage || capturedVideoUrl) && (
-                // Free-form comment input sits in the top half of the
-                // white card. The user types whatever caption they want
-                // attached to this capture; the button stack at the
-                // bottom is where the mint actions live.
-                <textarea
-                  value={captureComment}
-                  onChange={(e) => setCaptureComment(e.target.value)}
-                  placeholder="Add a comment about this capture..."
-                  style={{
+              {(capturedImage || capturedVideoUrl) && (() => {
+                // Tabbed caption composer. Each social gets its own
+                // buffer + counter; switching tabs preserves both
+                // texts so the user can draft in parallel. The
+                // Telegram channel post uses `captureComment`
+                // (bottom "channel" tab) — the classic single-field
+                // path stays working end-to-end for the pure
+                // channel-only share.
+                const X_MAX = 280
+                const FC_MAX = 320
+                const CH_MAX = 1024 // Telegram Bot API caption cap
+                const isX = captionTab === 'x'
+                const activeValue =
+                  captionTab === 'x' ? xComment
+                  : captionTab === 'farcaster' ? farcasterComment
+                  : captureComment
+                const setActive = (v: string) => {
+                  if (captionTab === 'x') setXComment(v)
+                  else if (captionTab === 'farcaster') setFarcasterComment(v)
+                  else setCaptureComment(v)
+                }
+                const activeMax = isX ? X_MAX : captionTab === 'farcaster' ? FC_MAX : CH_MAX
+                const activePlaceholder =
+                  captionTab === 'x'
+                    ? 'Draft your tweet (up to 280 chars)…'
+                    : captionTab === 'farcaster'
+                      ? 'Draft your Farcaster cast (up to 320 chars)…'
+                      : 'Draft your Telegram channel caption…'
+                const remaining = activeMax - activeValue.length
+                const remainingColor = remaining < 0
+                  ? '#e11d48'
+                  : remaining < 20
+                    ? '#f59e0b'
+                    : '#666'
+                return (
+                  <div style={{
                     position: 'absolute',
                     top: 80,
                     left: 16,
                     right: 16,
                     height: '42%',
-                    padding: '14px 16px',
-                    border: '1.5px solid #111',
-                    borderRadius: 14,
-                    background: '#fff',
-                    color: '#111',
-                    fontFamily: 'Space Mono, monospace',
-                    fontSize: 14,
-                    lineHeight: 1.45,
-                    resize: 'none',
-                    outline: 'none',
-                    boxShadow: '0 4px 18px rgba(0,0,0,0.06)',
-                    boxSizing: 'border-box',
-                    WebkitAppearance: 'none',
+                    display: 'flex',
+                    flexDirection: 'column',
                     zIndex: 4,
-                  }}
-                />
-              )}
+                  }}>
+                    {/* Tabs — X / Farcaster / Channel */}
+                    <div style={{
+                      display: 'flex',
+                      gap: 6,
+                      marginBottom: 8,
+                    }}>
+                      {(['x', 'farcaster', 'channel'] as const).map((tab) => {
+                        const active = captionTab === tab
+                        const label = tab === 'x' ? '𝕏' : tab === 'farcaster' ? 'Farcaster' : 'Channel'
+                        const usedLen =
+                          tab === 'x' ? xComment.length
+                          : tab === 'farcaster' ? farcasterComment.length
+                          : captureComment.length
+                        const cap = tab === 'x' ? X_MAX : tab === 'farcaster' ? FC_MAX : CH_MAX
+                        return (
+                          <button
+                            key={tab}
+                            type="button"
+                            onClick={() => setCaptionTab(tab)}
+                            style={{
+                              flex: 1,
+                              padding: '8px 10px',
+                              border: `1.5px solid ${active ? '#111' : '#ccc'}`,
+                              borderRadius: 10,
+                              background: active ? '#111' : '#fff',
+                              color: active ? '#fff' : '#111',
+                              fontFamily: 'Space Mono, monospace',
+                              fontSize: 12,
+                              fontWeight: 800,
+                              letterSpacing: 1,
+                              cursor: 'pointer',
+                              WebkitAppearance: 'none',
+                            }}
+                          >
+                            {label}
+                            <span style={{
+                              fontSize: 9,
+                              opacity: 0.7,
+                              marginLeft: 4,
+                            }}>{usedLen}/{cap}</span>
+                          </button>
+                        )
+                      })}
+                    </div>
+                    <textarea
+                      value={activeValue}
+                      onChange={(e) => setActive(e.target.value)}
+                      placeholder={activePlaceholder}
+                      style={{
+                        flex: 1,
+                        padding: '14px 16px',
+                        border: '1.5px solid #111',
+                        borderRadius: 14,
+                        background: '#fff',
+                        color: '#111',
+                        fontFamily: 'Space Mono, monospace',
+                        fontSize: 14,
+                        lineHeight: 1.45,
+                        resize: 'none',
+                        outline: 'none',
+                        boxShadow: '0 4px 18px rgba(0,0,0,0.06)',
+                        boxSizing: 'border-box',
+                        WebkitAppearance: 'none',
+                      }}
+                    />
+                    {/* Live remaining-chars counter for the active tab */}
+                    <div style={{
+                      marginTop: 4,
+                      textAlign: 'right',
+                      fontSize: 11,
+                      fontFamily: 'Space Mono, monospace',
+                      color: remainingColor,
+                      fontWeight: 700,
+                    }}>
+                      {remaining} left
+                    </div>
+                  </div>
+                )
+              })()}
               <div className="wid-bottom">
                 {!(capturedImage || capturedVideoUrl) && (
                   // The hash + timestamp belong on the cinematic
@@ -6051,6 +6177,77 @@ export default function Home() {
                 >
                   POST TO FARCASTER
                 </button>
+                {/* Fan-out to Channel + X + Farcaster in one gesture.
+                    X opens inline (single-gesture rule), Farcaster is
+                    queued as a follow-up tap in the "→ NEXT" strip
+                    that appears below; channel post fires in the
+                    background. Same UX pattern as the older POST TO
+                    ALL button. */}
+                <button
+                  className="wid-verify-btn"
+                  onClick={() => openMultiShare(['x', 'farcaster'])}
+                  disabled={xPostingStatus === 'posting'}
+                  style={{
+                    background: 'linear-gradient(135deg, #229ED9 0%, #000 45%, #7C65C1 100%)',
+                    backgroundImage: 'linear-gradient(135deg, #229ED9 0%, #000 45%, #7C65C1 100%)',
+                    color: '#fff',
+                    boxShadow: '0 4px 22px rgba(124,101,193,0.35)',
+                    border: '1px solid rgba(255,255,255,0.24)',
+                    fontWeight: 900,
+                    opacity: xPostingStatus === 'posting' ? 0.6 : 1,
+                    cursor: xPostingStatus === 'posting' ? 'wait' : 'pointer',
+                  }}
+                >
+                  {xPostingStatus === 'posting'
+                    ? 'POSTING...'
+                    : '🚀 POST TO CHANNEL + X + FARCASTER'}
+                </button>
+                {/* Follow-up queue for the multi-platform fan-out.
+                    Mobile browsers only allow one window.open per
+                    user gesture, so any platforms after the first
+                    get parked here — each tap on a "→ NEXT" button
+                    consumes a fresh gesture and reliably opens the
+                    composer. Currently seeded by the POST TO ALL
+                    button; Farcaster is the only social that ever
+                    ends up here today. */}
+                {pendingShareQueue.length > 0 && (
+                  <div style={{
+                    marginTop: 6,
+                    padding: '10px 12px',
+                    background: 'rgba(255,255,255,0.04)',
+                    border: '1px dashed rgba(255,255,255,0.28)',
+                    borderRadius: 12,
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: 8,
+                  }}>
+                    <div style={{
+                      fontSize: 11,
+                      letterSpacing: 3,
+                      color: 'rgba(255,255,255,0.6)',
+                      fontFamily: 'Space Mono, monospace',
+                      fontWeight: 700,
+                      textAlign: 'center',
+                    }}>
+                      NEXT — TAP TO OPEN
+                    </div>
+                    {pendingShareQueue.includes('farcaster') && (
+                      <button
+                        className="wid-verify-btn"
+                        onClick={() => openQueuedPlatform('farcaster')}
+                        style={{
+                          background: '#7C65C1',
+                          backgroundImage: 'none',
+                          color: '#fff',
+                          border: '1px solid rgba(255,255,255,0.18)',
+                          boxShadow: '0 4px 14px rgba(124,101,193,0.35)',
+                        }}
+                      >
+                        → OPEN FARCASTER
+                      </button>
+                    )}
+                  </div>
+                )}
                 <button className="wid-gas-btn" onClick={handleCopyLink}>
                   <span>🔗</span> COPY LINK
                 </button>
