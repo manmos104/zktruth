@@ -2446,6 +2446,24 @@ export default function Home() {
   const [farcasterComment, setFarcasterComment] = useState("");
   const [captionTab, setCaptionTab] = useState<'x' | 'farcaster' | 'channel'>('x');
 
+  // Farcaster signer state — when the user has connected via Neynar
+  // managed signers, we can publish casts server-side (1 tap, no
+  // composer round-trip). `farcasterSignerStatus` mirrors Neynar's
+  // signer lifecycle: 'none' before we've asked, 'pending_approval'
+  // while the user is deciding in Warpcast, 'approved' once they've
+  // signed the delegation and casts can be published, 'revoked' if
+  // they later pulled the permission.
+  const [farcasterSignerStatus, setFarcasterSignerStatus] =
+    useState<'none' | 'generated' | 'pending_approval' | 'approved' | 'revoked'>('none');
+  const [farcasterSignerApprovalUrl, setFarcasterSignerApprovalUrl] = useState<string | null>(null);
+  const [farcasterConnecting, setFarcasterConnecting] = useState(false);
+  // Poll handle for the "waiting for approval in Warpcast" phase.
+  const farcasterPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  // Late-binding ref so callbacks declared before publishFarcasterServer
+  // (like openMultiShare) can call the current implementation without
+  // creating a top-of-file ordering dependency.
+  const publishFarcasterServerRef = useRef<((text: string, embedUrl: string) => Promise<boolean>) | null>(null);
+
   // Snapshot key for localStorage. World App's auto-redirect after
   // verification re-loads the page in a fresh tab, dropping React state.
   // We snapshot enough of the flow's progress to land the user back on
@@ -4213,11 +4231,36 @@ export default function Home() {
       }
       window.open(u, '_blank', 'noopener,noreferrer')
     }
-    if (platforms.length === 0) {
+    // If Farcaster is one of the requested platforms AND we've got an
+    // approved Neynar signer, publish it server-side in the
+    // background — no composer, no queue entry, just a real cast.
+    // This is what makes the "🚀 POST TO CHANNEL + X + FARCASTER"
+    // button actually a 1-tap fan-out.
+    const serverFarcaster = platforms.includes('farcaster') && farcasterSignerStatus === 'approved'
+    const uiPlatforms = serverFarcaster
+      ? platforms.filter((p) => p !== 'farcaster')
+      : platforms
+    if (serverFarcaster) {
+      const fcText = fcUser ? `${fcUser}\n\n${textWithHashtags}` : textWithHashtags
+      ;(async () => {
+        const impl = publishFarcasterServerRef.current
+        const ok = impl ? await impl(fcText, url) : false
+        if (ok) {
+          setCopyStatus('✓ Posted to Farcaster')
+          setTimeout(() => setCopyStatus(''), 6000)
+        } else {
+          // Server publish failed — re-queue Farcaster for a manual
+          // composer tap so the user isn't left with nothing.
+          setPendingShareQueue((q) => q.includes('farcaster') ? q : [...q, 'farcaster'])
+        }
+      })()
+    }
+
+    if (uiPlatforms.length === 0) {
       setXPostingStatus('idle')
       return
     }
-    const first = platforms[0]
+    const first = uiPlatforms[0]
     openOne(intentFor(first).url)
 
     // 6) Copy the paste-fallback payload. Clipboard writeText is
@@ -4280,10 +4323,10 @@ export default function Home() {
     })()
 
     // 8) Queue the rest of the platforms for follow-up taps.
-    const rest = platforms.slice(1)
+    const rest = uiPlatforms.slice(1)
     setPendingShareQueue(rest)
     setXPostingStatus('idle')
-  }, [buildProofUrl, proofData, gpsLocation, mintComplete, xComment, farcasterComment]);
+  }, [buildProofUrl, proofData, gpsLocation, mintComplete, xComment, farcasterComment, farcasterSignerStatus]);
 
   // Follow-up handler for the queued platforms. Each button in the
   // "→ NEXT" strip calls this, giving each open its own user
@@ -4338,6 +4381,144 @@ export default function Home() {
   // OG card onto the tweet, and that requires the /proof page to
   // have a live telegramPostUrl to link to when scraped).
   const openXShare = useCallback(() => openMultiShare(['x']), [openMultiShare])
+
+  // ---- Farcaster server-side posting via Neynar managed signers ----
+  //
+  // Once the user taps CONNECT FARCASTER and approves in Warpcast, we
+  // can publish casts on their behalf without a composer round-trip.
+  // Until then we fall back to the compose intent path in
+  // `openFarcasterShare`.
+
+  // On wallet change / mount, ask the server whether we already have
+  // an approved signer stashed against this wallet. Cheap KV read.
+  useEffect(() => {
+    const raw = tonWallet?.account.address
+    if (!raw) { setFarcasterSignerStatus('none'); setFarcasterSignerApprovalUrl(null); return }
+    let cancelled = false
+    ;(async () => {
+      try {
+        const r = await fetch(`/api/farcaster/signer?wallet=${encodeURIComponent(raw)}`, { cache: 'no-store' })
+        if (!r.ok) return
+        const j = await r.json() as { status?: string; signer_approval_url?: string }
+        if (cancelled) return
+        const s = (j.status ?? 'none') as typeof farcasterSignerStatus
+        setFarcasterSignerStatus(s)
+        setFarcasterSignerApprovalUrl(j.signer_approval_url ?? null)
+      } catch { /* best-effort */ }
+    })()
+    return () => { cancelled = true }
+  }, [tonWallet?.account.address])
+
+  // Clean up any active poll on unmount.
+  useEffect(() => () => {
+    if (farcasterPollRef.current) { clearInterval(farcasterPollRef.current); farcasterPollRef.current = null }
+  }, [])
+
+  /**
+   * Kick off the Farcaster connect flow: create a signer, open
+   * Warpcast for the user to approve, then poll every 2s for the
+   * status flip to 'approved'.
+   */
+  const connectFarcaster = useCallback(async () => {
+    const wallet = tonWallet?.account.address
+    if (!wallet) {
+      setCopyStatus('Connect your TON wallet first')
+      setTimeout(() => setCopyStatus(''), 5000)
+      return
+    }
+    setFarcasterConnecting(true)
+    try {
+      const r = await fetch('/api/farcaster/signer', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ wallet }),
+      })
+      const j = await r.json() as { status?: string; signer_approval_url?: string; error?: string }
+      if (!r.ok) throw new Error(j.error || `signer create failed (${r.status})`)
+      setFarcasterSignerStatus((j.status ?? 'pending_approval') as typeof farcasterSignerStatus)
+      setFarcasterSignerApprovalUrl(j.signer_approval_url ?? null)
+      // Open the Warpcast approval URL inside Telegram's in-app
+      // browser (or a new tab in dev) — same one-gesture rule as the
+      // share intents.
+      if (j.signer_approval_url) {
+        const tg = (window as unknown as {
+          Telegram?: { WebApp?: { openLink?: (u: string) => void } }
+        }).Telegram?.WebApp
+        if (tg?.openLink) { try { tg.openLink(j.signer_approval_url) } catch { window.open(j.signer_approval_url, '_blank') } }
+        else window.open(j.signer_approval_url, '_blank', 'noopener,noreferrer')
+      }
+      // Poll for approval. Warpcast approval usually completes within
+      // ~10-30 seconds after the user taps Approve.
+      if (farcasterPollRef.current) { clearInterval(farcasterPollRef.current); farcasterPollRef.current = null }
+      const started = Date.now()
+      farcasterPollRef.current = setInterval(async () => {
+        // Give up after 5 minutes so we don't hammer the API forever.
+        if (Date.now() - started > 5 * 60 * 1000) {
+          if (farcasterPollRef.current) { clearInterval(farcasterPollRef.current); farcasterPollRef.current = null }
+          return
+        }
+        try {
+          const rr = await fetch(`/api/farcaster/signer?wallet=${encodeURIComponent(wallet)}`, { cache: 'no-store' })
+          if (!rr.ok) return
+          const jj = await rr.json() as { status?: string }
+          if (jj.status === 'approved') {
+            setFarcasterSignerStatus('approved')
+            if (farcasterPollRef.current) { clearInterval(farcasterPollRef.current); farcasterPollRef.current = null }
+            setCopyStatus('Farcaster connected ✓')
+            setTimeout(() => setCopyStatus(''), 6000)
+          } else if (jj.status === 'revoked') {
+            setFarcasterSignerStatus('revoked')
+            if (farcasterPollRef.current) { clearInterval(farcasterPollRef.current); farcasterPollRef.current = null }
+          }
+        } catch { /* keep polling */ }
+      }, 2500)
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err)
+      setCopyStatus(`Farcaster connect failed: ${msg.slice(0, 80)}`)
+      setTimeout(() => setCopyStatus(''), 10000)
+    } finally {
+      setFarcasterConnecting(false)
+    }
+  }, [tonWallet?.account.address])
+
+  /**
+   * Publish a Farcaster cast server-side. Returns true on success,
+   * false on any failure (which is the caller's cue to fall back to
+   * the compose intent path).
+   */
+  const publishFarcasterServer = useCallback(async (text: string, embedUrl: string): Promise<boolean> => {
+    const wallet = tonWallet?.account.address
+    if (!wallet) return false
+    if (farcasterSignerStatus !== 'approved') return false
+    try {
+      const r = await fetch('/api/farcaster/cast', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ wallet, text, embeds: [embedUrl] }),
+      })
+      if (!r.ok) {
+        // 409 means the signer was revoked / not approved anymore —
+        // reset our local state so the UI shows CONNECT again.
+        if (r.status === 409 || r.status === 404) {
+          try {
+            const j = await r.json() as { signer_approval_url?: string; status?: string }
+            setFarcasterSignerStatus((j.status ?? 'none') as typeof farcasterSignerStatus)
+            setFarcasterSignerApprovalUrl(j.signer_approval_url ?? null)
+          } catch {}
+        }
+        return false
+      }
+      return true
+    } catch {
+      return false
+    }
+  }, [tonWallet?.account.address, farcasterSignerStatus])
+
+  // Keep the late-binding ref in sync so openMultiShare (declared
+  // earlier) can invoke the current publishFarcasterServer impl.
+  useEffect(() => {
+    publishFarcasterServerRef.current = publishFarcasterServer
+  }, [publishFarcasterServer])
 
   /**
    * Robust clipboard write. `navigator.clipboard.writeText` is the
@@ -4404,6 +4585,22 @@ export default function Home() {
     // voice reads first in the cast.
     const fcUser = farcasterComment.trim()
     const fcText = fcUser ? `${fcUser}\n\n${textWithHashtags}` : textWithHashtags
+
+    // If the user has connected a Neynar signer, publish directly —
+    // no composer round-trip, no clipboard dance, 1-tap post.
+    if (farcasterSignerStatus === 'approved') {
+      setCopyStatus('Casting to Farcaster…')
+      const ok = await publishFarcasterServer(fcText, url)
+      if (ok) {
+        setCopyStatus('✓ Posted to Farcaster')
+        setTimeout(() => setCopyStatus(''), 6000)
+        return
+      }
+      // Fall through to composer if the server post failed.
+      setCopyStatus('Server post failed — opening Warpcast composer')
+      setTimeout(() => setCopyStatus(''), 6000)
+    }
+
     const intent = `https://warpcast.com/~/compose?text=${encodeURIComponent(fcText)}&embeds%5B%5D=${encodeURIComponent(url)}`
     await robustCopy(`${fcText}\n\n${url}`)
     setCopyStatus('Post text copied — paste into Warpcast if needed')
@@ -4419,7 +4616,7 @@ export default function Home() {
       try { tg.openLink(intent); return } catch { /* fall through */ }
     }
     window.open(intent, '_blank', 'noopener,noreferrer')
-  }, [buildProofUrl, proofData, gpsLocation, robustCopy, mintComplete, farcasterComment]);
+  }, [buildProofUrl, proofData, gpsLocation, robustCopy, mintComplete, farcasterComment, farcasterSignerStatus, publishFarcasterServer]);
 
 
   const handleShareWithImage = useCallback(async () => {
@@ -6159,6 +6356,67 @@ export default function Home() {
                 >
                   {xPostingStatus === 'posting' ? 'POSTING...' : 'POST TO CHANNEL + X'}
                 </button>
+                {/* Farcaster connect status pill. Server-side posting
+                    via Neynar managed signers requires a one-time
+                    Warpcast approval; once connected, POST TO
+                    FARCASTER becomes a true 1-tap cast (no composer
+                    round-trip). Until then the button below falls
+                    back to the compose intent. */}
+                {farcasterSignerStatus === 'approved' ? (
+                  <div style={{
+                    fontFamily: 'Space Mono, monospace',
+                    fontSize: 11,
+                    letterSpacing: 2,
+                    color: '#00c864',
+                    textAlign: 'center',
+                    padding: '4px 0',
+                  }}>
+                    ✓ FARCASTER CONNECTED — 1-TAP POSTING
+                  </div>
+                ) : farcasterSignerStatus === 'pending_approval' ? (
+                  <button
+                    className="wid-verify-btn"
+                    onClick={() => {
+                      if (farcasterSignerApprovalUrl) {
+                        const tg = (window as unknown as {
+                          Telegram?: { WebApp?: { openLink?: (u: string) => void } }
+                        }).Telegram?.WebApp
+                        if (tg?.openLink) { try { tg.openLink(farcasterSignerApprovalUrl); return } catch {} }
+                        window.open(farcasterSignerApprovalUrl, '_blank', 'noopener,noreferrer')
+                      }
+                    }}
+                    style={{
+                      background: 'rgba(124,101,193,0.15)',
+                      backgroundImage: 'none',
+                      color: '#fff',
+                      border: '1px dashed rgba(124,101,193,0.6)',
+                      boxShadow: 'none',
+                    }}
+                  >
+                    ⏳ APPROVE IN WARPCAST — TAP TO REOPEN
+                  </button>
+                ) : (
+                  <button
+                    className="wid-verify-btn"
+                    onClick={connectFarcaster}
+                    disabled={farcasterConnecting || !tonWallet?.account.address}
+                    style={{
+                      background: 'rgba(124,101,193,0.12)',
+                      backgroundImage: 'none',
+                      color: '#fff',
+                      border: '1px dashed rgba(124,101,193,0.55)',
+                      boxShadow: 'none',
+                      opacity: farcasterConnecting || !tonWallet?.account.address ? 0.55 : 1,
+                      cursor: farcasterConnecting || !tonWallet?.account.address ? 'wait' : 'pointer',
+                    }}
+                  >
+                    {!tonWallet?.account.address
+                      ? '🔗 CONNECT WALLET FIRST'
+                      : farcasterConnecting
+                      ? 'CONNECTING…'
+                      : '🔗 CONNECT FARCASTER (1-TAP POSTING)'}
+                  </button>
+                )}
                 {/* Standalone Farcaster (Warpcast) broadcast. Does
                     NOT hit the Telegram channel — this is a single-
                     target share so the user's Telegram followers
@@ -6175,7 +6433,7 @@ export default function Home() {
                     border: '1px solid rgba(255,255,255,0.18)',
                   }}
                 >
-                  POST TO FARCASTER
+                  {farcasterSignerStatus === 'approved' ? '⚡ POST TO FARCASTER (1-TAP)' : 'POST TO FARCASTER'}
                 </button>
                 {/* Fan-out to Channel + X + Farcaster in one gesture.
                     X opens inline (single-gesture rule), Farcaster is
