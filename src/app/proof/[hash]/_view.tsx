@@ -182,6 +182,43 @@ export async function ProofView({ hash: rawHash }: { hash: string }) {
         <h1 className="proof-status-title">{statusTitle}</h1>
         <div className="proof-status-sub">{statusSub}</div>
 
+        {/* Prominent Channel + Mini App hero CTAs. Placed high on the
+            page so first-time viewers arriving from an X or Farcaster
+            share can jump straight into the Telegram channel or the
+            Mini App without hunting for the links. */}
+        <div className="proof-hero-cta">
+          <a
+            className="proof-hero-btn primary"
+            href="https://t.me/zktruth_channel"
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            <svg viewBox="0 0 24 24" width="22" height="22" fill="currentColor" aria-hidden="true">
+              <path d="M9.036 15.812 8.7 20.53c.482 0 .69-.207.94-.454l2.255-2.156 4.673 3.418c.857.472 1.462.224 1.694-.792l3.073-14.412.001-.001c.274-1.268-.457-1.766-1.293-1.455L1.65 10.63c-1.235.482-1.217 1.174-.21 1.487l4.807 1.503 11.156-7.03c.525-.35 1.004-.157.611.192Z"/>
+            </svg>
+            <span>
+              <span className="proof-hero-lead">📣 JOIN THE CHANNEL</span>
+              <span className="proof-hero-sub">@zktruth_channel · live proofs</span>
+            </span>
+          </a>
+          <a
+            className="proof-hero-btn secondary"
+            href="https://t.me/zktruth_bot"
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <rect x="4" y="3" width="16" height="18" rx="3"/>
+              <circle cx="12" cy="8" r="1.5" fill="currentColor" stroke="none"/>
+              <path d="M8 13h8M8 17h5"/>
+            </svg>
+            <span>
+              <span className="proof-hero-lead">📸 CAPTURE YOUR OWN</span>
+              <span className="proof-hero-sub">Open zkTruth Mini App</span>
+            </span>
+          </a>
+        </div>
+
         {state !== 'notFound' && (
           <>
             {(videoUrl || posterUrl) && (
@@ -440,6 +477,46 @@ body { background: #f6f7fb; }
   font-size: 12px; color: rgba(13,18,36,0.55);
   letter-spacing: 0.3px; margin-bottom: 24px;
   text-align: center; font-weight: 500;
+}
+
+/* ---- Hero CTA (Channel + Mini App) ---- */
+/* Sits between the status headline and the media so anyone who
+   lands here from an X / Farcaster share sees the two Telegram
+   entry points immediately, without scrolling to the About section
+   at the bottom. */
+.proof-hero-cta {
+  width: 100%; max-width: 460px;
+  display: flex; flex-direction: column; gap: 10px;
+  margin: 0 0 24px;
+}
+.proof-hero-btn {
+  display: flex; align-items: center; gap: 14px;
+  padding: 16px 20px; border-radius: 16px;
+  text-decoration: none; color: #fff;
+  font-family: 'Inter', system-ui, sans-serif;
+  transition: transform .15s ease, box-shadow .15s ease, filter .15s ease;
+  border: 1px solid rgba(255,255,255,0.14);
+}
+.proof-hero-btn:hover { transform: translateY(-1px); filter: brightness(1.05); }
+.proof-hero-btn:active { transform: translateY(0); }
+.proof-hero-btn.primary {
+  background: linear-gradient(135deg, #229ED9 0%, #1a7fb0 100%);
+  box-shadow: 0 8px 26px rgba(34,158,217,0.42);
+}
+.proof-hero-btn.secondary {
+  background: linear-gradient(135deg, #0d1224 0%, #1a2140 100%);
+  box-shadow: 0 8px 26px rgba(13,18,36,0.32);
+}
+.proof-hero-btn svg { flex-shrink: 0; }
+.proof-hero-btn > span:last-child {
+  display: flex; flex-direction: column; gap: 2px; flex: 1; min-width: 0;
+}
+.proof-hero-lead {
+  font-size: 15px; font-weight: 800; letter-spacing: 0.4px;
+}
+.proof-hero-sub {
+  font-size: 11px; font-weight: 500; opacity: 0.82;
+  letter-spacing: 0.2px;
 }
 
 /* ---- Media tile ---- */
