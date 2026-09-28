@@ -5505,7 +5505,10 @@ export default function Home() {
                 // (bottom "channel" tab) — the classic single-field
                 // path stays working end-to-end for the pure
                 // channel-only share.
-                const X_MAX = 280
+                // X is now unlimited per user preference (Premium /
+                // long-post accounts can post beyond 280; the free-tier
+                // 280 cap is enforced by X itself at submit time).
+                const X_MAX = Number.POSITIVE_INFINITY
                 const FC_MAX = 320
                 const CH_MAX = 1024 // Telegram Bot API caption cap
                 const isX = captionTab === 'x'
@@ -5521,7 +5524,7 @@ export default function Home() {
                 const activeMax = isX ? X_MAX : captionTab === 'farcaster' ? FC_MAX : CH_MAX
                 const activePlaceholder =
                   captionTab === 'x'
-                    ? 'Draft your tweet (up to 280 chars)…'
+                    ? 'Draft your tweet…'
                     : captionTab === 'farcaster'
                       ? 'Draft your Farcaster cast (up to 320 chars)…'
                       : 'Draft your Telegram channel caption…'
@@ -5581,7 +5584,7 @@ export default function Home() {
                               fontSize: 9,
                               opacity: 0.7,
                               marginLeft: 4,
-                            }}>{usedLen}/{cap}</span>
+                            }}>{Number.isFinite(cap) ? `${usedLen}/${cap}` : `${usedLen}`}</span>
                           </button>
                         )
                       })}
@@ -5616,7 +5619,7 @@ export default function Home() {
                       color: remainingColor,
                       fontWeight: 700,
                     }}>
-                      {remaining} left
+                      {Number.isFinite(activeMax) ? `${remaining} left` : `${activeValue.length} chars`}
                     </div>
                   </div>
                 )
@@ -6178,77 +6181,6 @@ export default function Home() {
                 >
                   POST TO FARCASTER
                 </button>
-                {/* Fan-out to Channel + X + Farcaster in one gesture.
-                    X opens inline (single-gesture rule), Farcaster is
-                    queued as a follow-up tap in the "→ NEXT" strip
-                    that appears below; channel post fires in the
-                    background. Same UX pattern as the older POST TO
-                    ALL button. */}
-                <button
-                  className="wid-verify-btn"
-                  onClick={() => openMultiShare(['x', 'farcaster'])}
-                  disabled={xPostingStatus === 'posting'}
-                  style={{
-                    background: 'linear-gradient(135deg, #229ED9 0%, #000 45%, #7C65C1 100%)',
-                    backgroundImage: 'linear-gradient(135deg, #229ED9 0%, #000 45%, #7C65C1 100%)',
-                    color: '#fff',
-                    boxShadow: '0 4px 22px rgba(124,101,193,0.35)',
-                    border: '1px solid rgba(255,255,255,0.24)',
-                    fontWeight: 900,
-                    opacity: xPostingStatus === 'posting' ? 0.6 : 1,
-                    cursor: xPostingStatus === 'posting' ? 'wait' : 'pointer',
-                  }}
-                >
-                  {xPostingStatus === 'posting'
-                    ? 'POSTING...'
-                    : '🚀 POST TO CHANNEL + X + FARCASTER'}
-                </button>
-                {/* Follow-up queue for the multi-platform fan-out.
-                    Mobile browsers only allow one window.open per
-                    user gesture, so any platforms after the first
-                    get parked here — each tap on a "→ NEXT" button
-                    consumes a fresh gesture and reliably opens the
-                    composer. Currently seeded by the POST TO ALL
-                    button; Farcaster is the only social that ever
-                    ends up here today. */}
-                {pendingShareQueue.length > 0 && (
-                  <div style={{
-                    marginTop: 6,
-                    padding: '10px 12px',
-                    background: 'rgba(255,255,255,0.04)',
-                    border: '1px dashed rgba(255,255,255,0.28)',
-                    borderRadius: 12,
-                    display: 'flex',
-                    flexDirection: 'column',
-                    gap: 8,
-                  }}>
-                    <div style={{
-                      fontSize: 11,
-                      letterSpacing: 3,
-                      color: 'rgba(255,255,255,0.6)',
-                      fontFamily: 'Space Mono, monospace',
-                      fontWeight: 700,
-                      textAlign: 'center',
-                    }}>
-                      NEXT — TAP TO OPEN
-                    </div>
-                    {pendingShareQueue.includes('farcaster') && (
-                      <button
-                        className="wid-verify-btn"
-                        onClick={() => openQueuedPlatform('farcaster')}
-                        style={{
-                          background: '#7C65C1',
-                          backgroundImage: 'none',
-                          color: '#fff',
-                          border: '1px solid rgba(255,255,255,0.18)',
-                          boxShadow: '0 4px 14px rgba(124,101,193,0.35)',
-                        }}
-                      >
-                        → OPEN FARCASTER
-                      </button>
-                    )}
-                  </div>
-                )}
                 <button className="wid-gas-btn" onClick={handleCopyLink}>
                   <span>🔗</span> COPY LINK
                 </button>
