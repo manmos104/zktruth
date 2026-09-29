@@ -6411,7 +6411,7 @@ export default function Home() {
                 </div>
                 <div>
                   <span style={{ color: '#e0e0e0', fontWeight: 700 }}>Payout:</span>{' '}
-                  Top 100 share 85% of mint fees. Every Monday 00:00 UTC.
+                  Top 3 split 100% of mint fees (60% / 30% / 10%). Min 1 mint / week to qualify. Every Monday 00:00 UTC.
                 </div>
               </div>
             </div>

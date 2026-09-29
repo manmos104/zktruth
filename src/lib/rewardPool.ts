@@ -141,4 +141,11 @@ export const LEADERBOARD_SIZE = 3
 // the epoch. Blocks "one big mint on Sunday night" from stealing a
 // slot from someone who actually worked all week, and gives the
 // weekly rhythm some substance without needing full Sybil defence.
-export const MIN_MINTS_FOR_PAYOUT = 3
+//
+// BOOTSTRAP PHASE — set to 1. With a handful of active wallets the
+// old threshold of 3 was killing the leaderboard: nobody hit the
+// gate, so nobody earned medals or payouts and the whole ranking
+// looked broken. 1 mint = in the running keeps the pool moving and
+// gives new users an achievable first goal. Bump back up (3-5) once
+// active-wallet count hits triple digits.
+export const MIN_MINTS_FOR_PAYOUT = 1
