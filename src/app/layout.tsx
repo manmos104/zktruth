@@ -3,6 +3,7 @@ import Script from 'next/script'
 import { Geist } from 'next/font/google'
 import './globals.css'
 import { Providers } from './providers'
+import { SITE_ORIGIN } from '@/lib/siteUrl'
 
 const geist = Geist({ subsets: ['latin'] })
 
@@ -15,6 +16,11 @@ export const viewport: Viewport = {
 }
 
 export const metadata: Metadata = {
+  // Required for any relative URL in metadata to resolve. Without it
+  // Next.js falls back to the per-deployment VERCEL_URL, which is a
+  // different hostname on every push — bad news for social cards that
+  // get cached by URL.
+  metadataBase: new URL(SITE_ORIGIN),
   title: 'zkTruth',
   description: 'Proof of Capture on TON — verified photos & videos with on-chain authenticity',
   appleWebApp: {

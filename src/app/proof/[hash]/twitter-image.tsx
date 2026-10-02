@@ -27,6 +27,19 @@ export const runtime = 'nodejs'
 export const size = { width: 1200, height: 630 }
 export const contentType = 'image/png'
 
+/**
+ * CDN cache for the rendered card. Next.js' default on a dynamic
+ * ImageResponse route is `public, max-age=0, must-revalidate`, i.e. no
+ * edge caching at all — every scraper paid the full capture-fetch +
+ * Satori render, which we clocked at 5.5s. That is past the point where
+ * Twitterbot gives up on an image. `s-maxage` lets the Vercel edge
+ * serve the second and later hits instantly, and
+ * `stale-while-revalidate` keeps serving the old card while a fresher
+ * one renders in the background.
+ */
+const CARD_CACHE_CONTROL =
+  'public, max-age=0, s-maxage=86400, stale-while-revalidate=604800'
+
 function safeReadFile(p: string): Buffer {
   try { return fs.readFileSync(p) } catch { return Buffer.alloc(0) }
 }
@@ -42,8 +55,11 @@ const syneBold = safeReadFile(path.join(fontsDir, 'Syne-Bold.ttf'))
 
 async function fetchAsDataUrl(url: string): Promise<string | null> {
   try {
+    // Hard 3.5s budget. This route is the LAST-RESORT card, so the one
+    // thing it must never do is hang long enough for the crawler to
+    // walk away with no image — a branded fallback beats a timeout.
     const c = new AbortController()
-    const t = setTimeout(() => c.abort(), 8000)
+    const t = setTimeout(() => c.abort(), 3500)
     const res = await fetch(url, { signal: c.signal, cache: 'no-store' })
     clearTimeout(t)
     if (!res.ok) return null
@@ -129,7 +145,7 @@ export default async function TwitterImage(
           </div>
         </div>
       ),
-      { ...size, fonts },
+      { ...size, fonts, headers: { 'cache-control': CARD_CACHE_CONTROL } },
     )
   }
 
@@ -207,6 +223,15 @@ export default async function TwitterImage(
         </div>
       </div>
     ),
-    { ...size, fonts },
+    // Shorter edge TTL than the capture card: this one is the "media
+    // hasn't landed yet" state, so we want it re-rendered soon enough
+    // that the real photo takes over.
+    {
+      ...size,
+      fonts,
+      headers: {
+        'cache-control': 'public, max-age=0, s-maxage=60, stale-while-revalidate=600',
+      },
+    },
   )
 }

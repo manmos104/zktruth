@@ -1,6 +1,6 @@
-import { headers } from 'next/headers'
 import { getProofByHash, type ProofRecord } from '@/lib/proofStore'
 import { resolveCaptureMedia, type ResolvedCaptureMedia } from '@/lib/mediaResolver'
+import { SITE_ORIGIN } from '@/lib/siteUrl'
 
 /**
  * Shared render for the proof page. Extracted from `page.tsx` so both
@@ -52,10 +52,14 @@ async function loadProof(hash: string): Promise<ProofApiResponse> {
   let verified = false
   let reason: string | undefined
   try {
-    const h = await headers()
-    const proto = h.get('x-forwarded-proto') ?? 'https'
-    const host = h.get('host') ?? 'zktruth.vercel.app'
-    const res = await fetch(`${proto}://${host}/api/proof/${hash}`, {
+    // Absolute URL from a build-time constant rather than `headers()`.
+    // Touching `headers()` here opted the whole /proof/<hash> route out
+    // of static/ISR rendering — the response came back `cache-control:
+    // private, no-cache, no-store`, so every social scraper paid the
+    // full KV + R2 + tonapi round-trip. With the constant, `revalidate
+    // = 15` in page.tsx actually applies and repeat scrapes hit the
+    // Vercel edge cache.
+    const res = await fetch(`${SITE_ORIGIN}/api/proof/${hash}`, {
       next: { revalidate: 15 },
     })
     if (res.ok) {

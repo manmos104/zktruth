@@ -1,5 +1,6 @@
 import type { Metadata } from 'next'
 import { resolveCaptureMedia, type ResolvedCaptureMedia } from '@/lib/mediaResolver'
+import { SITE_ORIGIN } from '@/lib/siteUrl'
 import { ProofView } from './_view'
 
 /**
@@ -12,9 +13,9 @@ import { ProofView } from './_view'
  * (authenticity guarantee, anti-fake-news, decentralised journalism,
  * incentive structure).
  *
- * OG meta tags in the head point image/video at the raw capture on
- * Vercel Blob so the shared thumbnail on X / Telegram / Discord is
- * the actual photo, and the title carries the short hash.
+ * OG meta tags in the head point the card image at the raw capture on
+ * R2 so the shared thumbnail on X / Telegram / Discord is the actual
+ * photo, and the title carries the short hash.
  */
 
 export const revalidate = 15
@@ -38,13 +39,19 @@ export async function generateMetadata(
   const media = /^[0-9a-f]{64}$/.test(hash)
     ? await resolveCaptureMedia(hash).catch(() => ({ hasMedia: false } as ResolvedCaptureMedia))
     : ({ hasMedia: false } as ResolvedCaptureMedia)
-  const captureImage = media.imageUrl
-  const captureVideo = media.animationUrl
-  const videoMime =
-    captureVideo && /\.mp4(\?|$)/i.test(captureVideo)  ? 'video/mp4'
-    : captureVideo && /\.webm(\?|$)/i.test(captureVideo) ? 'video/webm'
-    : captureVideo && /\.mov(\?|$)/i.test(captureVideo)  ? 'video/quicktime'
-    : undefined
+
+  // NEVER emit a card without an image. X caches the card it scraped
+  // the first time a URL is seen (composer preview included) and keeps
+  // serving it for days, so a single early scrape that found no media
+  // used to leave the tweet permanently thumbnail-less — `images:
+  // undefined` meant no og:image / twitter:image tag at all.
+  //
+  // The branded Satori route is the floor: it always answers 200, and
+  // because it resolves the capture at RENDER time it self-heals — the
+  // same cached URL starts returning the real photo as soon as the R2
+  // upload lands.
+  const fallbackCard = `${SITE_ORIGIN}/proof/${hash}/opengraph-image`
+  const cardImage = media.imageUrl ?? fallbackCard
 
   return {
     title,
@@ -52,22 +59,24 @@ export async function generateMetadata(
     openGraph: {
       title,
       description,
-      images: captureImage ? [captureImage] : undefined,
-      videos: captureVideo
-        ? [{
-            url: captureVideo,
-            secureUrl: captureVideo,
-            type: videoMime,
-            width: 1080,
-            height: 1080,
-          }]
-        : undefined,
+      url: `${SITE_ORIGIN}/proof/${hash}`,
+      type: 'website',
+      images: [{ url: cardImage, alt: title }],
+      // NOTE: no `videos`. og:video used to be emitted for video mints
+      // (inline playback on Telegram/Discord), but those tags make X's
+      // crawler go after a Player Card, which needs per-domain
+      // whitelisting from X — unapproved, it renders no thumbnail at
+      // all. Farcaster ignores og:video and reads og:image, which is
+      // exactly why the same share showed a thumbnail on Farcaster and
+      // nothing on X. The Telegram channel post carries the real media
+      // through the Bot API, so dropping og:video costs us only
+      // Discord's inline player.
     },
     twitter: {
       card: 'summary_large_image',
       title,
       description,
-      images: captureImage ? [captureImage] : undefined,
+      images: [{ url: cardImage, alt: title }],
     },
   }
 }

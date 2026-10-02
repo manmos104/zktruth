@@ -6,14 +6,36 @@ import { r2HeadPublicUrl, r2List, getR2Client } from '@/lib/r2'
  *
  * Storage strategy after the R2 migration:
  *   1. Every NEW upload lands in Cloudflare R2 at `captures/<hash>.<ext>`.
- *   2. LEGACY uploads (pre-migration) still live in Vercel Blob at the
- *      same key. We check R2 first — the common case — and only fall
- *      back to Vercel Blob when R2 has nothing, so old records keep
- *      resolving without a manual copy.
+ *   2. LEGACY uploads (pre-migration) live in Vercel Blob at the same
+ *      key — but that store is currently BLOCKED (its public host
+ *      answers 403 and /robots.txt returns "Your store is blocked"),
+ *      so the fallback is off by default. See LEGACY_BLOB_FALLBACK.
  *
  * Callers get a single `ResolvedCaptureMedia` shape regardless of
  * which store the URL came from.
  */
+
+/**
+ * Legacy Vercel Blob fallback switch.
+ *
+ * Why it defaults OFF: the Blob store is suspended, so every fallback
+ * attempt is pure cost with two concrete downsides we measured while
+ * chasing the missing X thumbnail:
+ *
+ *   1. LATENCY. The fallback fires whenever EITHER channel is missing,
+ *      which for a photo-only capture is always (no animationUrl). It
+ *      costs 4 `head()` calls + a `list()` against a dead store and
+ *      pushed /proof/<hash> TTFB to 2.1–4.3s, versus 0.5–0.7s for a
+ *      capture that resolved purely from R2. Twitterbot gives a page
+ *      only a few seconds before it abandons the scrape, so this alone
+ *      can cost us the card.
+ *   2. DEAD URLS. Anything it did resolve pointed at the blocked host,
+ *      i.e. an og:image that answers 403 — guaranteed blank card.
+ *
+ * Set BLOB_LEGACY_FALLBACK=1 to turn it back on if the store is ever
+ * un-blocked.
+ */
+const LEGACY_BLOB_FALLBACK = process.env.BLOB_LEGACY_FALLBACK === '1'
 
 export interface ResolvedCaptureMedia {
   imageUrl?: string
@@ -100,7 +122,7 @@ export async function resolveCaptureMedia(hash: string): Promise<ResolvedCapture
   // Legacy Vercel Blob fallback. Only bother when at least one media
   // channel is still missing so we skip an unnecessary HEAD round-trip
   // in the common R2-hit case.
-  if (!imageUrl || !animationUrl) {
+  if (LEGACY_BLOB_FALLBACK && (!imageUrl || !animationUrl)) {
     const blob = await resolveFromVercelBlob(hash)
     imageUrl = imageUrl ?? blob.imageUrl
     animationUrl = animationUrl ?? blob.animationUrl
